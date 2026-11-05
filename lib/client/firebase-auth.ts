@@ -2,6 +2,7 @@
 
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { connectAuthEmulator, getAuth, getRedirectResult, signOut, type Auth, type User, type UserCredential } from "firebase/auth";
+import { disconnectDevicePushBeforeLogout } from "./push-logout";
 import { api } from "./api";
 
 export type AuthConfiguration = {
@@ -91,10 +92,12 @@ export async function syncServerSession(user: User, forceRefresh = false): Promi
 }
 
 export async function clearServerSession(): Promise<void> {
+  await disconnectDevicePushBeforeLogout();
   await api("/api/auth/session", { method: "DELETE", body: "{}" });
 }
 
 export async function logout(): Promise<void> {
+  await disconnectDevicePushBeforeLogout();
   // Clear both sessions even if one service is temporarily unavailable.
   const results = await Promise.allSettled([
     getFirebaseAuth().then(auth => auth ? signOut(auth) : undefined),

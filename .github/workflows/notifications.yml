@@ -1,0 +1,73 @@
+name: Dispatch SAI notifications
+
+on:
+  schedule:
+    # GitHub schedules are best effort, not exact alarm clocks. Avoid minute 0.
+    - cron: '2-57/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sai-notifications-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: github.repository == 'kreativ-works/sai-calendar' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      # No checkout, dependencies, stored deployment token or third-party action.
+      - name: Authenticate this workflow and dispatch due notifications
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          const audience = 'https://sai-our-calendar.seonguk.chatgpt.site/notifications';
+          const endpoint = 'https://sai-our-calendar.seonguk.chatgpt.site/api/internal/notifications/dispatch';
+          const deadline = Date.now() + 140_000;
+          try {
+            const requestUrl = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL || '');
+            const requestToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+            if (requestUrl.protocol !== 'https:' || !requestUrl.hostname.endsWith('.actions.githubusercontent.com') || requestUrl.username || requestUrl.password || !requestToken) {
+              throw new Error('GitHub OIDC request configuration is unavailable.');
+            }
+            requestUrl.searchParams.set('audience', audience);
+            const identity = await fetch(requestUrl, {
+              headers: { Authorization: `Bearer ${requestToken}` },
+              redirect: 'manual', signal: AbortSignal.timeout(15_000),
+            });
+            if (!identity.ok) throw new Error(`GitHub OIDC returned HTTP ${identity.status}.`);
+            const { value: token } = await identity.json();
+            if (typeof token !== 'string' || !token || token.length > 8192) throw new Error('GitHub OIDC returned an invalid token.');
+            const counts = {};
+            let calls = 0, remainingWork = 0, busy = 0;
+            for (; calls < 3;) {
+              const remainingMs = deadline - Date.now();
+              if (remainingMs <= 0) throw new Error('Notification dispatch could not be completed.');
+              const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: '{}', redirect: 'manual', signal: AbortSignal.timeout(Math.min(45_000, remainingMs)),
+              });
+              if (!response.ok) throw new Error(`Notification dispatch returned HTTP ${response.status}.`);
+              const result = await response.json();
+              calls++;
+              for (const name of ['scanned', 'generated', 'processed', 'sent', 'cancelled', 'failed', 'expired', 'queued', 'skipped', 'remaining', 'delivered', 'retried', 'scheduled', 'created', 'removed']) {
+                if (Number.isSafeInteger(result?.[name]) && result[name] >= 0) counts[name] = (counts[name] || 0) + result[name];
+              }
+              remainingWork = Number(result?.hasMore === true);
+              busy = Number(result?.busy === true);
+              if (busy || !remainingWork) break;
+            }
+            console.log(JSON.stringify({ status: 'ok', calls, remainingWork, busy, ...counts }));
+          } catch (error) {
+            // Never print request objects, JWTs, payloads, endpoints or user data.
+            const message = error instanceof Error && /^(GitHub OIDC|Notification dispatch) (returned|request configuration)/.test(error.message)
+              ? error.message : 'Notification dispatch could not be completed.';
+            console.error(message);
+            process.exitCode = 1;
+          }
+          NODE

@@ -4,6 +4,7 @@ import "./mobile-refinements.css";
 import "./mobile-first.css";
 import "./landing.css";
 import "./auth.css";
+import "./notifications.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://sai-our-calendar.seonguk.chatgpt.site"),
@@ -21,6 +22,7 @@ export const metadata: Metadata = {
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
+    apple: "/icons/icon-180.png",
   },
 };
 

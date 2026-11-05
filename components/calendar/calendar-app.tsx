@@ -9,6 +9,8 @@ import { createDemoEvents } from "@/lib/client/demo";
 import CalendarSettings, { type InviteLink } from "./calendar-settings";
 import Dialog from "./dialog";
 import EventEditor, { OWNERS, type OwnerNames } from "./event-editor";
+import NotificationCenter, { type NotificationView } from "@/components/notifications/notification-center";
+import type { NotificationItem } from "@/lib/domain/notifications";
 
 type View = "month" | "week" | "list";
 type EditorState = { date: string; event?: CalendarEvent } | null;
@@ -47,6 +49,9 @@ export default function CalendarApp({ initialDemo = false, initialSetup = null, 
   const [settings, setSettings] = useState<"create" | "join" | "settings" | null>(null);
   const [joinCode, setJoinCode] = useState(initialJoinCode);
   const [toast, setToast] = useState("");
+  const [notificationView, setNotificationView] = useState<NotificationView>(null);
+  const [notificationRefresh, setNotificationRefresh] = useState(0);
+  const notificationLinkHandled = useRef(false);
   const requestId = useRef(0);
   const initialized = useRef(false);
   const modeIntent = useRef<"demo" | "live">(initialDemo ? "demo" : "live");
@@ -125,6 +130,39 @@ export default function CalendarApp({ initialDemo = false, initialSetup = null, 
   const connected = !isDemo && !!snapshot?.household;
   const allConnected = connected && snapshot!.members.length === 2 && snapshot!.members.every(member => member.connected);
   const hasFilters = OWNERS.some(owner => filters[owner]);
+
+  const openNotification = useCallback(async (item: NotificationItem) => {
+    const requestedDate = item.occurrenceDate || "";
+    const date = validDate(requestedDate) && requestedDate >= "1970-01-01" && requestedDate <= "2100-12-31" ? requestedDate : today;
+    setNotificationView(null); setSettings(null); setEditor(null); setDetail(null); setQuery(""); setSearchOpen(false); setView("month"); setCursor(monthStart(date)); setSelected(date);
+    function revealDay() { window.requestAnimationFrame(() => { const agenda = document.getElementById("day-agenda"); agenda?.scrollIntoView({ behavior: "auto", block: "start" }); agenda?.focus({ preventScroll: true }); }); }
+    if (!item.eventId || item.kind === "event_deleted") { if (item.kind === "event_deleted") setToast("삭제된 일정이에요. 해당 날짜의 다른 약속을 확인해보세요."); revealDay(); return; }
+    try {
+      const dayEvents = isDemo ? expandEvents(demoEvents, date, date) : (await api<CalendarState>(`/api/state?from=${date}&to=${date}`)).events;
+      const found = dayEvents.find(event => event.id === item.eventId && occursOn(event, date));
+      if (found) setDetail(found);
+      else { setToast("일정이 변경되었거나 삭제됐어요. 해당 날짜의 약속을 확인해주세요."); revealDay(); }
+    } catch (cause) { setToast(cause instanceof Error ? cause.message : "일정을 확인하지 못했어요. 다시 시도해주세요."); }
+  }, [isDemo, demoEvents, today]);
+
+  useEffect(() => {
+    if (notificationLinkHandled.current || isDemo || !snapshot?.household) return;
+    notificationLinkHandled.current = true;
+    const url = new URL(window.location.href);
+    const id = url.searchParams.get("notification") || "";
+    const eventId = url.searchParams.get("event") || "";
+    const date = url.searchParams.get("date") || "";
+    if (!id && !eventId && !date) return;
+    const safeId = /^[a-zA-Z0-9_.:-]{1,160}$/.test(id) ? id : "";
+    const safeEvent = /^[a-zA-Z0-9_-]{1,120}$/.test(eventId) ? eventId : null;
+    const safeDate = validDate(date) && date >= "1970-01-01" && date <= "2100-12-31" ? date : null;
+    for (const key of ["notification", "event", "date"]) url.searchParams.delete(key);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    if (safeId) void api("/api/notifications", { method: "PATCH", body: JSON.stringify({ ids: [safeId] }) }).then(() => setNotificationRefresh(previous => previous + 1)).catch(() => {});
+    // Restore a notification destination from the external browser URL after hydration.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (safeEvent || safeDate) void openNotification({ id: safeId, kind: "reminder", title: "", body: "", eventId: safeEvent, occurrenceDate: safeDate, createdAt: "", readAt: null });
+  }, [isDemo, snapshot?.household, openNotification]);
 
   function selectDate(date: string) { setSelected(date); if (date.slice(0, 7) !== cursor.slice(0, 7)) setCursor(monthStart(date)); setSidebarOpen(false); }
   function move(amount: number) {
@@ -207,7 +245,7 @@ export default function CalendarApp({ initialDemo = false, initialSetup = null, 
     </aside>
 
     <div className="app-workspace">
-      <header className={`app-header ${searchOpen ? "has-search" : ""}`}><div className="header-title-group"><button className="icon-button menu-button" onClick={() => setSidebarOpen(true)} aria-label="메뉴 열기"><Menu size={22} /></button><div><h1>{householdName}</h1><p>소소한 일상부터, 소중한 약속까지.</p></div></div><div className="header-actions"><button ref={searchToggle} className="icon-button mobile-search-toggle" aria-label={searchOpen ? "일정 검색 닫기" : "일정 검색 열기"} aria-expanded={searchOpen} onClick={toggleMobileSearch}><Search size={20} /></button><label className="search-field"><Search size={17} /><span className="sr-only">일정 검색</span><input ref={searchInput} aria-label="일정 검색" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === "Escape") { setQuery(""); setSearchOpen(false); if (window.matchMedia("(max-width: 640px)").matches) searchToggle.current?.focus(); } }} placeholder="일정 검색" />{query ? <button className="tiny-icon-button" onClick={() => setQuery("")} aria-label="검색어 지우기"><X size={14} /></button> : <span className="search-shortcut">⌕</span>}</label><button className="people-button" onClick={openSettings} aria-label={isDemo ? "우리 캘린더 시작하기" : "공유 연결 설정"}><span className="paired-avatars"><span className="avatar owner-a">{names.a.slice(0, 1)}</span><span className="avatar owner-b">{names.b.slice(0, 1)}</span></span><span className="people-label">{isDemo ? "함께 시작하기" : allConnected ? "우리 둘" : "짝꿍 초대"}<ChevronRight size={13} /></span></button></div></header>
+      <header className={`app-header ${searchOpen ? "has-search" : ""}`}><div className="header-title-group"><button className="icon-button menu-button" onClick={() => setSidebarOpen(true)} aria-label="메뉴 열기"><Menu size={22} /></button><div><h1>{householdName}</h1><p>소소한 일상부터, 소중한 약속까지.</p></div></div><div className="header-actions"><button ref={searchToggle} className="icon-button mobile-search-toggle" aria-label={searchOpen ? "일정 검색 닫기" : "일정 검색 열기"} aria-expanded={searchOpen} onClick={toggleMobileSearch}><Search size={20} /></button><label className="search-field"><Search size={17} /><span className="sr-only">일정 검색</span><input ref={searchInput} aria-label="일정 검색" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === "Escape") { setQuery(""); setSearchOpen(false); if (window.matchMedia("(max-width: 640px)").matches) searchToggle.current?.focus(); } }} placeholder="일정 검색" />{query ? <button className="tiny-icon-button" onClick={() => setQuery("")} aria-label="검색어 지우기"><X size={14} /></button> : <span className="search-shortcut">⌕</span>}</label><NotificationCenter demo={isDemo} enabled={connected && !requiresSignIn} userId={snapshot?.user.id} events={events} view={notificationView} refreshKey={notificationRefresh} onViewChange={setNotificationView} onOpenEvent={openNotification} onConnect={openSettings} /><button className="people-button" onClick={openSettings} aria-label={isDemo ? "우리 캘린더 시작하기" : "공유 연결 설정"}><span className="paired-avatars"><span className="avatar owner-a">{names.a.slice(0, 1)}</span><span className="avatar owner-b">{names.b.slice(0, 1)}</span></span><span className="people-label">{isDemo ? "함께 시작하기" : allConnected ? "우리 둘" : "짝꿍 초대"}<ChevronRight size={13} /></span></button></div></header>
       {isDemo ? <div className="demo-banner"><span className="demo-badge"><Sparkles size={13} />둘러보기</span><p><span className="desktop-copy">예시 일정으로 사이를 만나보세요.</span> 실제 일정은 우리 캘린더에서 시작해요.</p><button onClick={() => { if (snapshot?.household) showLive(); else setSettings("create"); }}>{snapshot?.household ? "내 캘린더로 이동" : "우리 캘린더 만들기"}<ArrowRight size={14} /></button></div> : connectionError ? <div className="connection-banner" role="alert"><AlertCircle size={16} /><span>{connectionError}</span><button onClick={() => void refresh().catch(() => {})}>다시 연결</button></div> : loading && !snapshot ? <div className="connection-banner" role="status"><LoaderCircle size={16} className="spin" /><span>우리 캘린더 연결을 확인하고 있어요.</span></div> : !snapshot?.household ? <div className="invite-banner"><Heart size={15} /><span>우리 캘린더를 만들거나 짝꿍의 초대로 연결해보세요.</span><button onClick={openSettings}>함께 시작하기<ArrowRight size={13} /></button></div> : !allConnected ? <div className="invite-banner"><Link2 size={15} /><span>짝꿍을 초대하면 두 사람의 일정을 함께 볼 수 있어요.</span><button onClick={openSettings}>짝꿍 초대하기<ArrowRight size={13} /></button></div> : null}
 
       <main id="calendar-main" className="calendar-main">
@@ -234,7 +272,7 @@ export default function CalendarApp({ initialDemo = false, initialSetup = null, 
     </nav>
     {editor ? <EventEditor key={editor.event?.occurrenceId || `new-${editor.date}`} date={editor.date} event={editor.event} events={events} names={names} demo={isDemo} onSave={saveEvent} onClose={() => setEditor(null)} /> : null}
     {detail ? <EventDetail event={detail} names={names} demo={isDemo} onClose={() => setDetail(null)} onEdit={() => { setEditor({ date: detail.startDate, event: detail }); setDetail(null); }} onDelete={() => deleteEvent(detail)} /> : null}
-    {settings ? <CalendarSettings key={`${settings}-${snapshot?.household?.id || "new"}`} state={snapshot} initialTab={settings} initialCode={joinCode} connectionError={connectionError} requiresSignIn={requiresSignIn} loading={loading && !snapshot} demo={isDemo} onRetry={() => void refresh().catch(() => {})} onCreate={createHousehold} onUpdate={updateHousehold} onJoin={joinHousehold} onInvite={() => api<InviteLink>("/api/invites", { method: "POST", body: "{}" })} onRevoke={async () => { await api("/api/invites", { method: "DELETE", body: "{}" }); await refresh(true); }} onLive={showLive} onDemo={showDemo} onClose={() => setSettings(null)} /> : null}
+    {settings ? <CalendarSettings key={`${settings}-${snapshot?.household?.id || "new"}`} state={snapshot} initialTab={settings} initialCode={joinCode} connectionError={connectionError} requiresSignIn={requiresSignIn} loading={loading && !snapshot} demo={isDemo} onRetry={() => void refresh().catch(() => {})} onCreate={createHousehold} onUpdate={updateHousehold} onJoin={joinHousehold} onInvite={() => api<InviteLink>("/api/invites", { method: "POST", body: "{}" })} onRevoke={async () => { await api("/api/invites", { method: "DELETE", body: "{}" }); await refresh(true); }} onLive={showLive} onDemo={showDemo} onNotifications={() => { setSettings(null); setNotificationView("settings"); }} onClose={() => setSettings(null)} /> : null}
     <div className={`toast ${toast ? "visible" : ""}`} role="status" aria-live="polite">{toast ? <><CircleCheck size={17} />{toast}</> : null}</div>
     <span className="sr-only" role="status">{loading && !isDemo ? "일정을 불러오는 중" : ""}</span>
   </div>;

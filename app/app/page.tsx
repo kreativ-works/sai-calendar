@@ -2,6 +2,7 @@ import CalendarApp from "@/components/calendar/calendar-app";
 import SessionBridge from "@/components/auth/session-bridge";
 import { getAppUser } from "@/lib/server/app-auth";
 import { redirect } from "next/navigation";
+import { validDate } from "@/lib/domain/calendar";
 
 export const dynamic = "force-dynamic";
 export const metadata = { robots: { index: false, follow: false } };
@@ -16,8 +17,11 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
   const preserved = new URLSearchParams();
   if (params.setup === "1" || params.setup === "join") preserved.set("setup", params.setup);
   if (initialJoinCode) preserved.set("join", initialJoinCode);
+  if (typeof params.notification === "string" && /^[a-zA-Z0-9_.:-]{1,160}$/.test(params.notification)) preserved.set("notification", params.notification);
+  if (typeof params.event === "string" && /^[a-zA-Z0-9_-]{1,120}$/.test(params.event)) preserved.set("event", params.event);
+  if (typeof params.date === "string" && validDate(params.date)) preserved.set("date", params.date);
   const returnTo = `/app${preserved.size ? `?${preserved.toString()}` : ""}`;
-  // Preserve invitations and onboarding across an ordinary account sign-in.
+  // Preserve invitations, onboarding and safe notification destinations through sign-in.
   return <CalendarAccess initialDemo={initialDemo} initialSetup={initialSetup} initialJoinCode={initialJoinCode} returnTo={returnTo} />;
 }
 

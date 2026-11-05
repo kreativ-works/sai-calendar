@@ -202,9 +202,51 @@ try {
   assert.equal((await state(a)).events.find((item) => item.id === eventId).title, "짝꿍이 바꾼 일정");
   passed("partner edits propagate across separate authenticated cookies");
 
+  assert.equal((await appRequest("/api/notifications")).status, 401);
+  let aNotices = (await appRequest("/api/notifications", a)).value;
+  const changedNotice = aNotices.items.find(item => item.eventId === eventId && item.kind === "event_updated");
+  assert.ok(changedNotice);
+  assert.ok(!(await appRequest("/api/notifications", b)).value.items.some(item => item.eventId === eventId && item.kind === "event_updated"));
+  passed("notification inbox authenticates the recipient and excludes self edits");
+  assert.equal((await appRequest("/api/notifications", b, "PATCH", { ids: [changedNotice.id] })).status, 200);
+  assert.equal((await appRequest("/api/notifications", a)).value.items.find(item => item.id === changedNotice.id).readAt, null);
+  assert.equal((await appRequest("/api/notifications", a, "PATCH", { ids: [changedNotice.id] })).status, 200);
+  assert.ok((await appRequest("/api/notifications", a)).value.items.find(item => item.id === changedNotice.id).readAt);
+  passed("read state is persisted and cannot mark another member's notice read");
+
+  const near = new Date(Date.now() + 15 * 60_000 + 9 * 3_600_000).toISOString();
+  const end = new Date(Date.now() + 25 * 60_000 + 9 * 3_600_000).toISOString();
+  const nearId = randomUUID();
+  const nearEvent = { ...event, clientRequestId: nearId, title: "곧 시작하는 내 합성 일정", startDate: near.slice(0, 10), endDate: end.slice(0, 10), startTime: near.slice(11, 16), endTime: end.slice(11, 16), ownerScope: "a" };
+  assert.equal((await appRequest("/api/events", b, "POST", nearEvent)).status, 200);
+  aNotices = (await appRequest("/api/notifications", a)).value;
+  assert.ok(aNotices.items.some(item => item.eventId === nearId && item.kind === "event_created"));
+  assert.ok(aNotices.items.some(item => item.eventId === nearId && item.kind === "reminder"));
+  assert.ok(!(await appRequest("/api/notifications", b)).value.items.some(item => item.eventId === nearId && item.kind === "reminder"));
+  const noticeCount = aNotices.items.filter(item => item.eventId === nearId).length;
+  assert.equal((await appRequest("/api/events", b, "POST", nearEvent)).status, 200);
+  assert.equal((await appRequest("/api/notifications", a)).value.items.filter(item => item.eventId === nearId).length, noticeCount);
+  passed("near-future owner reminders and partner creation notices persist without retry duplicates");
+
+  const prefs = aNotices.preferences;
+  assert.equal((await appRequest("/api/notifications/preferences", a, "PATCH", { ...prefs, partnerChanges: false, quietEnabled: true, quietStart: "22:00", quietEnd: "08:00" })).status, 200);
+  assert.equal((await appRequest("/api/notifications/preferences", a, "PATCH", prefs)).status, 409);
+  const savedPrefs = (await appRequest("/api/notifications", a)).value.preferences;
+  assert.equal(savedPrefs.partnerChanges, false);
+  assert.equal((await appRequest("/api/notifications", b)).value.preferences.partnerChanges, true);
+  assert.equal((await appRequest("/api/notifications/preferences", a, "PATCH", { ...savedPrefs, quietEnd: savedPrefs.quietStart })).status, 422);
+  assert.equal((await appRequest("/api/notifications/preferences", a, "PATCH", { ...savedPrefs, partnerChanges: true, quietEnabled: false })).status, 200);
+  passed("personal notification settings persist, validate quiet hours and reject stale revisions");
+  assert.equal((await appRequest("/api/notifications/subscriptions", a, "POST", { subscription: { endpoint: "http://127.0.0.1/private", keys: { p256dh: "bad", auth: "bad" } } })).status, 422);
+  assert.equal((await appRequest("/api/internal/notifications/dispatch", null, "POST", {})).status, 401);
+  assert.equal((await appRequest(`/api/events/${nearId}`, b, "DELETE", { revision: 1 })).status, 200);
+  assert.ok((await appRequest("/api/notifications", a)).value.items.some(item => item.eventId === nearId && item.kind === "event_deleted"));
+  passed("push subscriptions reject arbitrary targets, cron rejects anonymous calls and partner deletions are recorded");
+
   const c = await googleUser("google-c");
   await establish(c);
   assert.equal((await state(c)).household, null);
+  assert.deepEqual((await appRequest("/api/notifications", c)).value.items, []);
   assert.notEqual((await appRequest("/api/invites/join", c, "POST", { code: invitation.value.code })).status, 200);
   assert.equal((await appRequest(`/api/events/${eventId}`, c, "PATCH", { ...event, revision: 2 })).status, 403);
   assert.equal((await appRequest("/api/invites", a, "POST", {})).status, 409);
@@ -262,6 +304,9 @@ try {
   // existing local legacy member and events remain intact after link coverage.
   for (const subject of createdSubjects) db.prepare("DELETE FROM auth_identities WHERE provider = ? AND subject = ?").run(`firebase:${project}`, subject);
   for (const household of createdHouseholds) {
+    db.prepare("DELETE FROM notifications WHERE household_id = ?").run(household);
+    db.prepare("DELETE FROM push_subscriptions WHERE user_id IN (SELECT user_id FROM members WHERE household_id = ?)").run(household);
+    db.prepare("DELETE FROM notification_preferences WHERE user_id IN (SELECT user_id FROM members WHERE household_id = ?)").run(household);
     db.prepare("DELETE FROM invitations WHERE household_id = ?").run(household);
     db.prepare("DELETE FROM events WHERE household_id = ?").run(household);
     db.prepare("DELETE FROM members WHERE household_id = ?").run(household);

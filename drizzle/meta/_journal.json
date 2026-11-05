@@ -15,6 +15,13 @@
       "when": 1793846990644,
       "tag": "0001_amazing_jetstream",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793862787239,
+      "tag": "0002_small_gabe_jones",
+      "breakpoints": true
     }
   ]
 }

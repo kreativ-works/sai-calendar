@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { getAppUser, type AppUser } from "./app-auth";
 import { getFirebaseConfig } from "./firebase-config";
+import { eventNotificationStatements } from "./notification-db";
 import {
   CalendarError, boundedText, expandEvents, parseEvent, parseHousehold,
   parseRange, parseRevision, type CalendarState, type MemberSlot,
@@ -174,9 +175,13 @@ export async function createEvent(request: Request): Promise<{ ok: true }> {
     if (previous) return { ok: true };
   }
   try {
-    const result = await db.prepare("INSERT INTO events (id, household_id, title, start_date, end_date, start_time, end_time, all_day, owner_scope, category, location, note, repeat_rule, repeat_until, revision, created_by, updated_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ? WHERE (SELECT COUNT(*) FROM events WHERE household_id = ?) < 2000")
-      .bind(id, member!.household_id, event.title, event.startDate, event.endDate, event.startTime, event.endTime, +event.allDay, event.ownerScope, event.category, event.location, event.note, event.repeat, event.repeatUntil, user.userId, new Date().toISOString(), member!.household_id).run();
-    if (!result.meta.changes) throw new CalendarError(422, "EVENT_LIMIT", "캘린더는 최대 2,000개 일정을 저장할 수 있어요.");
+    const now = new Date().toISOString();
+    const result = await db.batch([
+      db.prepare("INSERT INTO events (id, household_id, title, start_date, end_date, start_time, end_time, all_day, owner_scope, category, location, note, repeat_rule, repeat_until, revision, created_by, updated_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ? WHERE (SELECT COUNT(*) FROM events WHERE household_id = ?) < 2000")
+        .bind(id, member!.household_id, event.title, event.startDate, event.endDate, event.startTime, event.endTime, +event.allDay, event.ownerScope, event.category, event.location, event.note, event.repeat, event.repeatUntil, user.userId, now, member!.household_id),
+      ...eventNotificationStatements(db, { kind: "event_created", eventId: id, householdId: member!.household_id, actorId: user.userId, actorSlot: member!.slot, guardRevision: 1, sourceRevision: 1, eventTitle: event.title, occurrenceDate: event.startDate, now }),
+    ]);
+    if (!result[0].meta.changes) throw new CalendarError(422, "EVENT_LIMIT", "캘린더는 최대 2,000개 일정을 저장할 수 있어요.");
   } catch (error) {
     // A lost response or simultaneous retry with the same request UUID is success
     // only when the resulting record belongs to this same actor and household.
@@ -190,21 +195,32 @@ export async function createEvent(request: Request): Promise<{ ok: true }> {
 }
 
 export async function updateEvent(request: Request, id: string): Promise<{ ok: true }> {
-  const { db, member } = await context(request);
+  const { db, member, user } = await context(request);
   const data = await body(request);
   const event = parseEvent(data);
   const revision = parseRevision(data.revision);
-  const result = await db.prepare("UPDATE events SET title = ?, start_date = ?, end_date = ?, start_time = ?, end_time = ?, all_day = ?, owner_scope = ?, category = ?, location = ?, note = ?, repeat_rule = ?, repeat_until = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND household_id = ? AND revision = ?")
-    .bind(event.title, event.startDate, event.endDate, event.startTime, event.endTime, +event.allDay, event.ownerScope, event.category, event.location, event.note, event.repeat, event.repeatUntil, new Date().toISOString(), id, member!.household_id, revision).run();
-  if (!result.meta.changes) await notFoundOrConflict(db, id, member!.household_id);
+  const previous = await db.prepare("SELECT * FROM events WHERE id = ? AND household_id = ?").bind(id, member!.household_id).first<EventRow>();
+  if (previous?.revision === revision && Object.entries(event).every(([key, value]) => (fromRow(previous) as unknown as Record<string, unknown>)[key] === value)) return { ok: true };
+  const now = new Date().toISOString();
+  const result = await db.batch([
+    ...eventNotificationStatements(db, { kind: "event_updated", eventId: id, householdId: member!.household_id, actorId: user.userId, actorSlot: member!.slot, guardRevision: revision, sourceRevision: revision + 1, eventTitle: event.title, occurrenceDate: event.startDate, now }),
+    db.prepare("UPDATE events SET title = ?, start_date = ?, end_date = ?, start_time = ?, end_time = ?, all_day = ?, owner_scope = ?, category = ?, location = ?, note = ?, repeat_rule = ?, repeat_until = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND household_id = ? AND revision = ?")
+      .bind(event.title, event.startDate, event.endDate, event.startTime, event.endTime, +event.allDay, event.ownerScope, event.category, event.location, event.note, event.repeat, event.repeatUntil, now, id, member!.household_id, revision),
+  ]);
+  if (!result[result.length - 1].meta.changes) await notFoundOrConflict(db, id, member!.household_id);
   return { ok: true };
 }
 
 export async function deleteEvent(request: Request, id: string): Promise<{ ok: true }> {
-  const { db, member } = await context(request);
+  const { db, member, user } = await context(request);
   const revision = parseRevision((await body(request)).revision);
-  const result = await db.prepare("DELETE FROM events WHERE id = ? AND household_id = ? AND revision = ?").bind(id, member!.household_id, revision).run();
-  if (!result.meta.changes) await notFoundOrConflict(db, id, member!.household_id);
+  const previous = await db.prepare("SELECT * FROM events WHERE id = ? AND household_id = ?").bind(id, member!.household_id).first<EventRow>();
+  const result = await db.batch([
+    ...eventNotificationStatements(db, { kind: "event_deleted", eventId: id, householdId: member!.household_id, actorId: user.userId, actorSlot: member!.slot, guardRevision: revision, sourceRevision: revision, eventTitle: previous?.title ?? "일정", occurrenceDate: previous?.start_date ?? "", now: new Date().toISOString() }),
+    db.prepare("UPDATE notification_deliveries SET status = 'cancelled', lease_until = NULL, lease_token = NULL WHERE notification_id IN (SELECT id FROM notifications WHERE event_id = ? AND kind = 'reminder' AND household_id = ?) AND status IN ('queued', 'sending') AND EXISTS (SELECT 1 FROM events WHERE id = ? AND household_id = ? AND revision = ?)").bind(id, member!.household_id, id, member!.household_id, revision),
+    db.prepare("DELETE FROM events WHERE id = ? AND household_id = ? AND revision = ?").bind(id, member!.household_id, revision),
+  ]);
+  if (!result[result.length - 1].meta.changes) await notFoundOrConflict(db, id, member!.household_id);
   return { ok: true };
 }
 
