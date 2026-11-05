@@ -1,0 +1,12 @@
+{
+  "name": "사이 — 우리의 시간을 함께",
+  "short_name": "사이",
+  "description": "각자의 하루, 함께하는 시간. 두 사람을 위한 공유 캘린더.",
+  "lang": "ko",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f7f5",
+  "theme_color": "#6750bf",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

@@ -1,0 +1,32 @@
+/* Final readability and touch refinements, kept separate from the base layout. */
+:root{--b:#a94c48;--both:#28705f}
+.header-title-group p,.brand-tagline,.calendar-subline,.agenda-count,
+.calendar-footer,.agenda-privacy,.field-hint,.optional,.signin-section>p,
+.sidebar-section-label,.shared-space p,.filter-type { color:#736b80; }
+.demo-banner,.invite-banner { color:#726083; }
+.signin-section h3 { color:#665075; }
+.weekday-row>span { color:#746b7b; }
+@media(max-width:860px){
+  .app-sidebar{visibility:hidden;pointer-events:none}
+  .app-sidebar.is-open{visibility:visible;pointer-events:auto}
+}
+@media(max-width:640px){
+  .calendar-toolbar{min-height:116px}
+  .calendar-arrows{gap:2px}
+  .calendar-arrows .icon-button{width:44px;min-width:44px;height:44px}
+  .today-button{height:44px;min-width:44px;margin-left:0;padding:0 8px;font-size:12px}
+  .view-segment button{min-height:44px;min-width:44px;font-size:12px}
+  .export-button{height:44px;width:44px;min-width:44px}
+  .calendar-tools{bottom:9px;gap:3px}
+  .menu-button{width:44px;min-width:44px;height:44px}
+  .day-number{font-size:13px}
+  .weekday-row>span{font-size:11px}
+  .header-title-group p{font-size:10px}
+  .search-field input{font-size:13px}
+  .demo-banner,.invite-banner,.connection-banner{font-size:10px}
+  .demo-badge,.demo-banner p,.demo-banner>button,.invite-banner>button,.connection-banner>button{font-size:10px}
+  .calendar-subline,.sync-state{font-size:10px}
+  .agenda-count,.agenda-owner,.agenda-event-time,.agenda-event p,.agenda-note{font-size:12px}
+  .agenda-date>span,.agenda-privacy,.field-hint{font-size:11px}
+  .add-day-button{min-height:44px;font-size:13px}
+}
