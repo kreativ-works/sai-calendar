@@ -222,11 +222,14 @@ try {
   aNotices = (await appRequest("/api/notifications", a)).value;
   assert.ok(aNotices.items.some(item => item.eventId === nearId && item.kind === "event_created"));
   assert.ok(aNotices.items.some(item => item.eventId === nearId && item.kind === "reminder"));
-  assert.ok(!(await appRequest("/api/notifications", b)).value.items.some(item => item.eventId === nearId && item.kind === "reminder"));
+  const bNotices = (await appRequest("/api/notifications", b)).value;
+  assert.equal(aNotices.preferences.includePartner, true);
+  assert.equal(bNotices.preferences.includePartner, true);
+  assert.ok(bNotices.items.some(item => item.eventId === nearId && item.kind === "reminder"));
   const noticeCount = aNotices.items.filter(item => item.eventId === nearId).length;
   assert.equal((await appRequest("/api/events", b, "POST", nearEvent)).status, 200);
   assert.equal((await appRequest("/api/notifications", a)).value.items.filter(item => item.eventId === nearId).length, noticeCount);
-  passed("near-future owner reminders and partner creation notices persist without retry duplicates");
+  passed("near-future reminders include both partners by default and persist without retry duplicates");
 
   const prefs = aNotices.preferences;
   assert.equal((await appRequest("/api/notifications/preferences", a, "PATCH", { ...prefs, partnerChanges: false, quietEnabled: true, quietStart: "22:00", quietEnd: "08:00" })).status, 200);

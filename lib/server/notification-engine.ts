@@ -10,6 +10,10 @@ export type SubscriptionRow = { id: string; user_id: string; endpoint: string; p
 type DeliveryRow = NoticeRow & { delivery_id: string; subscription_id: string; subscription_user: string; endpoint: string; p256dh: string; auth: string; expiration_time: number | null; attempts: number };
 const DAY = 86_400_000;
 
+function reminderTitle(owner: StoredEvent["ownerScope"], viewer: MemberSlot): string {
+  return owner === "both" ? "함께하는 약속이 곧 시작돼요" : owner === viewer ? "내 일정이 곧 시작돼요" : "짝꿍의 일정이 곧 시작돼요";
+}
+
 export function notificationDatabase(environment: object): D1Database {
   const db = (environment as { DB?: D1Database }).DB;
   if (!db) throw new CalendarError(503, "DATABASE_UNAVAILABLE", "알림 저장소에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.");
@@ -42,7 +46,7 @@ export async function materializeUserReminders(db: D1Database, member: Member, n
   for (const candidate of candidates) {
     const event = candidate.occurrence;
     const body = `${event.startDate} ${event.allDay ? "종일" : event.startTime} · ${event.title}`;
-    statements.push(db.prepare("INSERT INTO notifications (id, household_id, recipient_id, kind, title, body, event_id, occurrence_date, reminder_start_at, reminder_all_day, source_revision, dedupe_key, created_at) SELECT ?, ?, ?, 'reminder', ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM events WHERE id = ? AND household_id = ? AND revision = ?) AND EXISTS (SELECT 1 FROM members WHERE user_id = ? AND household_id = ?) AND EXISTS (SELECT 1 FROM notification_preferences WHERE user_id = ? AND revision = ? AND reminders = 1) ON CONFLICT(recipient_id, dedupe_key) DO UPDATE SET title = excluded.title, body = excluded.body, source_revision = excluded.source_revision, reminder_start_at = excluded.reminder_start_at WHERE notifications.read_at IS NULL").bind(crypto.randomUUID(), member.household_id, member.user_id, "일정이 곧 시작돼요", body, event.id, event.startDate, candidate.startAt, +event.allDay, event.revision, candidate.dedupeKey, now.toISOString(), event.id, member.household_id, event.revision, member.user_id, member.household_id, member.user_id, prefRow.revision));
+    statements.push(db.prepare("INSERT INTO notifications (id, household_id, recipient_id, kind, title, body, event_id, occurrence_date, reminder_start_at, reminder_all_day, source_revision, dedupe_key, created_at) SELECT ?, ?, ?, 'reminder', ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM events WHERE id = ? AND household_id = ? AND revision = ?) AND EXISTS (SELECT 1 FROM members WHERE user_id = ? AND household_id = ?) AND EXISTS (SELECT 1 FROM notification_preferences WHERE user_id = ? AND revision = ? AND reminders = 1) ON CONFLICT(recipient_id, dedupe_key) DO UPDATE SET title = excluded.title, body = excluded.body, source_revision = excluded.source_revision, reminder_start_at = excluded.reminder_start_at WHERE notifications.read_at IS NULL").bind(crypto.randomUUID(), member.household_id, member.user_id, reminderTitle(event.ownerScope, member.slot), body, event.id, event.startDate, candidate.startAt, +event.allDay, event.revision, candidate.dedupeKey, now.toISOString(), event.id, member.household_id, event.revision, member.user_id, member.household_id, member.user_id, prefRow.revision));
     if (Date.parse(candidate.expiresAt) > now.getTime()) statements.push(queueNotificationStatement(db, { recipientId: member.user_id, dedupeKey: candidate.dedupeKey }, now.toISOString()));
   }
   const results = await db.batch(statements);
@@ -66,8 +70,8 @@ async function validateReminder(db: D1Database, row: DeliveryRow, prefs: Notific
   const expires = occurrence.allDay ? Date.parse(`${occurrence.startDate}T00:00:00+09:00`) + DAY : Date.parse(start);
   if (due > now.getTime() || expires <= now.getTime()) return { valid: false };
   const body = `${occurrence.startDate} ${occurrence.allDay ? "종일" : occurrence.startTime} · ${occurrence.title}`;
-  await db.prepare("UPDATE notifications SET body = ?, source_revision = ? WHERE id = ? AND read_at IS NULL").bind(body, event.revision, row.id).run();
-  return { valid: true, payload: { title: row.title, body, ttl: Math.max(1, Math.min(3600, Math.ceil((expires - now.getTime()) / 1000))) } };
+  await db.prepare("UPDATE notifications SET title = ?, body = ?, source_revision = ? WHERE id = ? AND read_at IS NULL").bind(reminderTitle(occurrence.ownerScope, member.slot), body, event.revision, row.id).run();
+  return { valid: true, payload: { title: reminderTitle(occurrence.ownerScope, member.slot), body, ttl: Math.max(1, Math.min(3600, Math.ceil((expires - now.getTime()) / 1000))) } };
 }
 
 export async function flushNotificationDeliveries(environment: object, now = new Date(), limit = 12, sender: typeof sendWebPush = sendWebPush): Promise<{ sent: number; cancelled: number; retried: number }> {

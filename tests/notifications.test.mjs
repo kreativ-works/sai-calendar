@@ -7,7 +7,7 @@ import { DEFAULT_NOTIFICATION_PREFERENCES as defaults } from "../lib/domain/noti
 import { eventNotificationStatements, isQuietTime, reminderCandidates, queueNotificationStatement } from "../lib/server/notification-db.ts";
 import { flushNotificationDeliveries, materializeUserReminders } from "../lib/server/notification-engine.ts";
 
-const migrations = await Promise.all(["0000_tan_randall_flagg", "0001_amazing_jetstream", "0002_small_gabe_jones"].map((name) => readFile(new URL(`../drizzle/${name}.sql`, import.meta.url), "utf8")));
+const migrations = await Promise.all(["0000_tan_randall_flagg", "0001_amazing_jetstream", "0002_small_gabe_jones", "0003_partner_reminders_default"].map((name) => readFile(new URL(`../drizzle/${name}.sql`, import.meta.url), "utf8")));
 const vapid = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
 const privateJwk = await crypto.subtle.exportKey("jwk", vapid.privateKey);
 const publicKey = Buffer.from(await crypto.subtle.exportKey("raw", vapid.publicKey)).toString("base64url");
@@ -53,11 +53,56 @@ function fixture(context) {
   } };
 }
 
-test("reminders use canonical own/both scope and can explicitly include the partner", () => {
+test("reminders include both partners by default and respect explicit partner opt-out", () => {
   const events = [event({ id: "own", ownerScope: "b" }), event({ id: "both" }), event({ id: "partner", ownerScope: "a" })];
-  assert.deepEqual(reminderCandidates(events, "b", defaults, now).map((entry) => entry.occurrence.id), ["both", "own"]);
-  assert.equal(reminderCandidates(events, "b", { ...defaults, includePartner: true }, now).length, 3);
+  assert.equal(defaults.includePartner, true);
+  assert.deepEqual(reminderCandidates(events, "b", defaults, now).map((entry) => entry.occurrence.id), ["both", "own", "partner"]);
+  assert.deepEqual(reminderCandidates(events, "b", { ...defaults, includePartner: false }, now).map((entry) => entry.occurrence.id), ["both", "own"]);
   assert.equal(reminderCandidates(events, "b", { ...defaults, reminders: false }, now).length, 0);
+});
+
+test("partner-default migration upgrades untouched preferences and preserves saved opt-outs and disabled reminders", (context) => {
+  const sqlite = new DatabaseSync(":memory:");
+  context.after(() => sqlite.close());
+  sqlite.exec("PRAGMA foreign_keys = ON;");
+  for (const migration of migrations.slice(0, -1)) sqlite.exec(migration);
+  const previousTime = "2026-01-01T00:00:00.000Z";
+  const insert = sqlite.prepare("INSERT INTO notification_preferences (user_id,include_partner,reminders,revision,minutes,enabled_at,updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
+  for (const [id, include, reminders, revision, minutes] of [["untouched", 0, 1, 1, 30], ["saved-opt-out", 0, 1, 2, 60], ["reminders-off", 0, 0, 1, 30], ["already-included", 1, 1, 1, 30]]) insert.run(id, include, reminders, revision, minutes, previousTime, previousTime);
+  const before = Object.fromEntries(sqlite.prepare("SELECT * FROM notification_preferences").all().map(row => [row.user_id, row]));
+  sqlite.exec(migrations.at(-1));
+  for (const id of ["untouched", "reminders-off"]) {
+    const row = sqlite.prepare("SELECT * FROM notification_preferences WHERE user_id = ?").get(id);
+    assert.equal(row.include_partner, 1);
+    assert.equal(row.revision, 2);
+    assert.notEqual(row.updated_at, previousTime);
+    assert.ok(Number.isFinite(Date.parse(row.updated_at)));
+    assert.deepEqual({ ...row, include_partner: before[id].include_partner, revision: before[id].revision, updated_at: before[id].updated_at }, { ...before[id] });
+  }
+  for (const id of ["saved-opt-out", "already-included"]) assert.deepEqual(sqlite.prepare("SELECT * FROM notification_preferences WHERE user_id = ?").get(id), before[id]);
+  sqlite.prepare("INSERT INTO notification_preferences (user_id,enabled_at,updated_at) VALUES ('new-user',?,?)").run(now.toISOString(), now.toISOString());
+  assert.equal(sqlite.prepare("SELECT include_partner FROM notification_preferences WHERE user_id='new-user'").get().include_partner, 1);
+  assert.equal(sqlite.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
+});
+
+test("default preferences materialize and deliver partner-owned reminders in both member directions", async (context) => {
+  for (const [recipient, partner] of [["a", "b"], ["b", "a"]]) {
+    const f = fixture(context);
+    f.sqlite.prepare("UPDATE events SET owner_scope=? WHERE id='event-1'").run(partner);
+    if (recipient === "a") f.sqlite.prepare("INSERT INTO push_subscriptions (id,user_id,endpoint,p256dh,auth,created_at,updated_at) VALUES ('sub-a','a','https://fcm.googleapis.com/fcm/send/synthetic-a','synthetic-key','synthetic-auth',?,?)").run(now.toISOString(), now.toISOString());
+    await materializeUserReminders(f.adapter, { user_id: recipient, household_id: "household-1", slot: recipient }, now);
+    const notice = f.sqlite.prepare("SELECT recipient_id,kind,event_id,title FROM notifications").get();
+    assert.deepEqual({ ...notice }, { recipient_id: recipient, kind: "reminder", event_id: "event-1", title: "짝꿍의 일정이 곧 시작돼요" });
+    f.sqlite.prepare("UPDATE notification_preferences SET preview=1 WHERE user_id=?").run(recipient);
+    const sent = [];
+    const result = await flushNotificationDeliveries(f.environment, now, 12, async (subscription, payload) => { sent.push({ subscription, payload }); return { ok: true, gone: false, retryable: false }; });
+    assert.equal(result.sent, 1);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].payload.title, "짝꿍의 일정이 곧 시작돼요");
+    assert.equal(sent[0].subscription.endpoint, `https://fcm.googleapis.com/fcm/send/synthetic${recipient === "a" ? "-a" : ""}`);
+    assert.match(sent[0].payload.url, /event=event-1/);
+    assert.equal(f.sqlite.prepare("SELECT status FROM notification_deliveries").get().status, "sent");
+  }
 });
 
 test("new near-future events inside the configured lead time get an immediate reminder without old backlog", () => {
@@ -159,7 +204,9 @@ test("title-only reminder edits refresh one existing notice and deliver current 
 
 test("deleted, rescheduled, or no-longer-owned reminders are cancelled before provider send", async (context) => {
   for (const sql of ["DELETE FROM events WHERE id='event-1'", "UPDATE events SET start_time='11:00',end_time='12:00',revision=2 WHERE id='event-1'", "UPDATE events SET owner_scope='a',revision=2 WHERE id='event-1'"]) {
-    const f = fixture(context); await materializeUserReminders(f.adapter, { user_id: "b", household_id: "household-1", slot: "b" }, now); f.sqlite.exec(sql); let sends = 0;
+    const f = fixture(context);
+    f.sqlite.prepare("INSERT INTO notification_preferences (user_id,include_partner,revision,enabled_at,updated_at) VALUES ('b',0,2,?,?)").run(now.toISOString(), now.toISOString());
+    await materializeUserReminders(f.adapter, { user_id: "b", household_id: "household-1", slot: "b" }, now); f.sqlite.exec(sql); let sends = 0;
     await flushNotificationDeliveries(f.environment, now, 12, async () => { sends++; return { ok: true, gone: false, retryable: false }; });
     assert.equal(sends, 0); assert.equal(f.sqlite.prepare("SELECT status FROM notification_deliveries").get().status, "cancelled");
   }

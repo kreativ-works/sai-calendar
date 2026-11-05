@@ -16,7 +16,7 @@ export interface NotificationPreferences {
 }
 
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
-  partnerChanges: true, reminders: true, includePartner: false, minutes: 30,
+  partnerChanges: true, reminders: true, includePartner: true, minutes: 30,
   allDayTime: "09:00", quietEnabled: false, quietStart: "22:00", quietEnd: "08:00",
   preview: false, revision: 1,
 };

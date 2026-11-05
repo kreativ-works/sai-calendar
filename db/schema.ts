@@ -65,7 +65,7 @@ export const notificationPreferences = sqliteTable("notification_preferences", {
   userId: text("user_id").primaryKey(),
   partnerChanges: integer("partner_changes").notNull().default(1),
   reminders: integer("reminders").notNull().default(1),
-  includePartner: integer("include_partner").notNull().default(0),
+  includePartner: integer("include_partner").notNull().default(1),
   minutes: integer("minutes").notNull().default(30),
   allDayTime: text("all_day_time").notNull().default("09:00"),
   quietEnabled: integer("quiet_enabled").notNull().default(0),
