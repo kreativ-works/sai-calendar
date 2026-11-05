@@ -22,28 +22,34 @@ function EmptyState({ title, subtitle, onCreate }: { title: string; subtitle?: s
   return <div className="empty-state"><div className="empty-symbol"><CalendarHeart size={30} strokeWidth={1.2} /></div><h3>{title}</h3>{subtitle ? <p>{subtitle}</p> : null}{onCreate ? <button className="text-button" onClick={onCreate}><Plus size={15} />일정 만들기</button> : null}</div>;
 }
 
-export default function CalendarApp() {
+type CalendarAppProps = { initialDemo?: boolean; initialSetup?: "create" | "join" | null; initialJoinCode?: string; signedIn?: boolean };
+
+export default function CalendarApp({ initialDemo = false, initialSetup = null, initialJoinCode = "", signedIn = false }: CalendarAppProps) {
   const [today, setToday] = useState(todayInSeoul);
   const [cursor, setCursor] = useState(() => monthStart(todayInSeoul()));
   const [selected, setSelected] = useState(todayInSeoul);
   const [view, setView] = useState<View>("month");
   const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const searchToggle = useRef<HTMLButtonElement>(null);
   const [filters, setFilters] = useState(ALL_FILTERS);
-  const [mode, setMode] = useState<"demo" | "live">("demo");
+  const [mode, setMode] = useState<"demo" | "live">(initialDemo ? "demo" : "live");
   const [snapshot, setSnapshot] = useState<CalendarState | null>(null);
   const [demoEvents, setDemoEvents] = useState<StoredEvent[]>(createDemoEvents);
   const [loading, setLoading] = useState(true);
   const [connectionError, setConnectionError] = useState("");
-  const [requiresSignIn, setRequiresSignIn] = useState(false);
+  const [requiresSignIn, setRequiresSignIn] = useState(!signedIn);
   const [lastRefreshed, setLastRefreshed] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editor, setEditor] = useState<EditorState>(null);
   const [detail, setDetail] = useState<CalendarEvent | null>(null);
   const [settings, setSettings] = useState<"create" | "join" | "settings" | null>(null);
-  const [joinCode, setJoinCode] = useState("");
+  const [joinCode, setJoinCode] = useState(initialJoinCode);
   const [toast, setToast] = useState("");
   const requestId = useRef(0);
   const initialized = useRef(false);
+  const modeIntent = useRef<"demo" | "live">(initialDemo ? "demo" : "live");
   const searching = query.trim().length > 0;
   const from = searching ? today : addDays(monthStart(cursor), -7);
   const to = searching ? addDays(today, 365) : addDays(monthEnd(cursor), 7);
@@ -59,21 +65,29 @@ export default function CalendarApp() {
       if (id !== requestId.current) return result;
       setSnapshot(result); setConnectionError(""); setRequiresSignIn(false);
       setLastRefreshed(new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date()));
-      if (!initialized.current) { initialized.current = true; if (result.household) setMode("live"); }
+      if (!initialized.current) {
+        initialized.current = true;
+        if (modeIntent.current === "live") {
+          setMode("live");
+          if (!result.household) setSettings(initialSetup === "join" || initialJoinCode ? "join" : "create");
+        }
+      }
       return result;
     } catch (error) {
-      if (id === requestId.current) { setConnectionError(error instanceof Error ? error.message : "일정을 불러오지 못했어요."); setRequiresSignIn(error instanceof ApiError && error.status === 401); }
+      if (id === requestId.current) {
+        const signInRequired = error instanceof ApiError && error.status === 401;
+        setConnectionError(error instanceof Error ? error.message : "일정을 불러오지 못했어요.");
+        setRequiresSignIn(signInRequired);
+        if (signInRequired && modeIntent.current === "live" && !initialized.current) setSettings(initialSetup === "join" || initialJoinCode ? "join" : "create");
+      }
       throw error;
     } finally { if (id === requestId.current) setLoading(false); }
-  }, [from, to]);
+  }, [from, to, initialDemo, initialSetup, initialJoinCode]);
 
   // These effects hydrate external URL/storage/API state after SSR, avoiding a different first client render.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => { void refresh().catch(() => {}); }, [refresh]);
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get("join");
-    if (code) { setJoinCode(code); setSettings("join"); }
     try { const stored = localStorage.getItem("sai:view:v1"); if (stored === "month" || stored === "week" || stored === "list") setView(stored); } catch { /* Preferences are optional. */ }
     const timer = window.setInterval(() => setToday(todayInSeoul()), 60_000);
     return () => window.clearInterval(timer);
@@ -118,8 +132,38 @@ export default function CalendarApp() {
     else { const date = shiftMonth(cursor, amount); setCursor(date); setSelected(date); }
   }
   function goToday() { setCursor(monthStart(today)); setSelected(today); }
-  function openSettings() { setSettings(snapshot?.household ? "settings" : "create"); setSidebarOpen(false); }
-  function create(date = selected) { setEditor({ date }); setSidebarOpen(false); }
+  function toggleMobileSearch() {
+    setSearchOpen(!searchOpen);
+    if (searchOpen) setQuery("");
+    else window.requestAnimationFrame(() => searchInput.current?.focus());
+  }
+  function showDayAgenda(date: string) {
+    selectDate(date);
+    window.requestAnimationFrame(() => {
+      const agenda = document.getElementById("day-agenda");
+      agenda?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+      agenda?.focus({ preventScroll: true });
+    });
+  }
+  function showMobileView(next: View) {
+    setView(next);
+    setQuery("");
+    document.getElementById("calendar-main")?.scrollIntoView({ behavior: "auto", block: "start" });
+  }
+  function openSettings() {
+    if (!snapshot && !requiresSignIn) {
+      setToast(loading ? "캘린더 연결을 확인하고 있어요. 잠시만 기다려주세요." : "연결을 확인한 뒤 다시 시도해주세요.");
+      return;
+    }
+    setSettings(snapshot?.household ? "settings" : initialSetup === "join" || joinCode ? "join" : "create");
+    setSidebarOpen(false);
+  }
+  function create(date = selected) {
+    if (!isDemo && (!snapshot?.household || requiresSignIn)) { openSettings(); return; }
+    setEditor({ date }); setSidebarOpen(false);
+  }
+  function showLive() { modeIntent.current = "live"; setMode("live"); setSettings(null); window.history.replaceState({}, "", "/app"); }
+  function showDemo() { modeIntent.current = "demo"; setMode("demo"); window.history.replaceState({}, "", "/app?demo=1"); }
   async function saveEvent(input: CalendarEventInput, event?: CalendarEvent, clientRequestId?: string) {
     if (isDemo) {
       const id = event?.id || `demo-${crypto.randomUUID()}`;
@@ -136,13 +180,13 @@ export default function CalendarApp() {
     setDetail(null); setToast(isDemo ? "예시 일정을 삭제했어요." : "일정을 삭제했어요.");
   }
   async function createHousehold(input: HouseholdInput) {
-    await api("/api/household", { method: "POST", body: JSON.stringify(input) }); await refresh(true); setMode("live"); setSettings("settings"); setToast("둘만의 캘린더가 생겼어요. 이제 짝꿍을 초대해보세요.");
+    await api("/api/household", { method: "POST", body: JSON.stringify(input) }); await refresh(true); modeIntent.current = "live"; setMode("live"); setSettings("settings"); window.history.replaceState({}, "", "/app"); setToast("둘만의 캘린더가 생겼어요. 이제 짝꿍을 초대해보세요.");
   }
   async function updateHousehold(input: HouseholdInput) {
     await api("/api/household", { method: "PATCH", body: JSON.stringify({ ...input, revision: snapshot?.household?.revision }) }); await refresh(true); setMode("live");
   }
   async function joinHousehold(code: string) {
-    await api("/api/invites/join", { method: "POST", body: JSON.stringify({ code }) }); await refresh(true); setMode("live"); setSettings(null); window.history.replaceState({}, "", window.location.pathname); setToast("짝꿍의 캘린더에 연결됐어요.");
+    await api("/api/invites/join", { method: "POST", body: JSON.stringify({ code }) }); await refresh(true); modeIntent.current = "live"; setMode("live"); setSettings(null); setJoinCode(""); window.history.replaceState({}, "", "/app"); setToast("짝꿍의 캘린더에 연결됐어요.");
   }
   function exportView() {
     const list = searching ? filtered : activeView === "week" ? filtered.filter(event => event.endDate >= weekStart(selected) && event.startDate <= addDays(weekStart(selected), 6)) : monthEvents;
@@ -163,28 +207,34 @@ export default function CalendarApp() {
     </aside>
 
     <div className="app-workspace">
-      <header className="app-header"><div className="header-title-group"><button className="icon-button menu-button" onClick={() => setSidebarOpen(true)} aria-label="메뉴 열기"><Menu size={22} /></button><div><h1>{householdName}</h1><p>소소한 일상부터, 소중한 약속까지.</p></div></div><div className="header-actions"><label className="search-field"><Search size={17} /><span className="sr-only">일정 검색</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="일정 검색" />{query ? <button className="tiny-icon-button" onClick={() => setQuery("")} aria-label="검색어 지우기"><X size={14} /></button> : <span className="search-shortcut">⌕</span>}</label><button className="people-button" onClick={openSettings} aria-label={isDemo ? "우리 캘린더 시작하기" : "공유 연결 설정"}><span className="paired-avatars"><span className="avatar owner-a">{names.a.slice(0, 1)}</span><span className="avatar owner-b">{names.b.slice(0, 1)}</span></span><span className="people-label">{isDemo ? "함께 시작하기" : allConnected ? "우리 둘" : "짝꿍 초대"}<ChevronRight size={13} /></span></button></div></header>
-      {isDemo ? <div className="demo-banner"><span className="demo-badge"><Sparkles size={13} />둘러보기</span><p><span className="desktop-copy">예시 일정으로 사이를 만나보세요.</span> 실제 일정은 우리 캘린더에서 시작해요.</p><button onClick={() => { if (snapshot?.household) setMode("live"); else setSettings("create"); }}>{snapshot?.household ? "내 캘린더로 이동" : "우리 캘린더 만들기"}<ArrowRight size={14} /></button></div> : connectionError ? <div className="connection-banner" role="alert"><AlertCircle size={16} /><span>{connectionError}</span><button onClick={() => void refresh().catch(() => {})}>다시 연결</button></div> : !allConnected ? <div className="invite-banner"><Link2 size={15} /><span>짝꿍을 초대하면 두 사람의 일정을 함께 볼 수 있어요.</span><button onClick={openSettings}>짝꿍 초대하기<ArrowRight size={13} /></button></div> : null}
+      <header className={`app-header ${searchOpen ? "has-search" : ""}`}><div className="header-title-group"><button className="icon-button menu-button" onClick={() => setSidebarOpen(true)} aria-label="메뉴 열기"><Menu size={22} /></button><div><h1>{householdName}</h1><p>소소한 일상부터, 소중한 약속까지.</p></div></div><div className="header-actions"><button ref={searchToggle} className="icon-button mobile-search-toggle" aria-label={searchOpen ? "일정 검색 닫기" : "일정 검색 열기"} aria-expanded={searchOpen} onClick={toggleMobileSearch}><Search size={20} /></button><label className="search-field"><Search size={17} /><span className="sr-only">일정 검색</span><input ref={searchInput} aria-label="일정 검색" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === "Escape") { setQuery(""); setSearchOpen(false); if (window.matchMedia("(max-width: 640px)").matches) searchToggle.current?.focus(); } }} placeholder="일정 검색" />{query ? <button className="tiny-icon-button" onClick={() => setQuery("")} aria-label="검색어 지우기"><X size={14} /></button> : <span className="search-shortcut">⌕</span>}</label><button className="people-button" onClick={openSettings} aria-label={isDemo ? "우리 캘린더 시작하기" : "공유 연결 설정"}><span className="paired-avatars"><span className="avatar owner-a">{names.a.slice(0, 1)}</span><span className="avatar owner-b">{names.b.slice(0, 1)}</span></span><span className="people-label">{isDemo ? "함께 시작하기" : allConnected ? "우리 둘" : "짝꿍 초대"}<ChevronRight size={13} /></span></button></div></header>
+      {isDemo ? <div className="demo-banner"><span className="demo-badge"><Sparkles size={13} />둘러보기</span><p><span className="desktop-copy">예시 일정으로 사이를 만나보세요.</span> 실제 일정은 우리 캘린더에서 시작해요.</p><button onClick={() => { if (snapshot?.household) showLive(); else setSettings("create"); }}>{snapshot?.household ? "내 캘린더로 이동" : "우리 캘린더 만들기"}<ArrowRight size={14} /></button></div> : connectionError ? <div className="connection-banner" role="alert"><AlertCircle size={16} /><span>{connectionError}</span><button onClick={() => void refresh().catch(() => {})}>다시 연결</button></div> : loading && !snapshot ? <div className="connection-banner" role="status"><LoaderCircle size={16} className="spin" /><span>우리 캘린더 연결을 확인하고 있어요.</span></div> : !snapshot?.household ? <div className="invite-banner"><Heart size={15} /><span>우리 캘린더를 만들거나 짝꿍의 초대로 연결해보세요.</span><button onClick={openSettings}>함께 시작하기<ArrowRight size={13} /></button></div> : !allConnected ? <div className="invite-banner"><Link2 size={15} /><span>짝꿍을 초대하면 두 사람의 일정을 함께 볼 수 있어요.</span><button onClick={openSettings}>짝꿍 초대하기<ArrowRight size={13} /></button></div> : null}
 
       <main id="calendar-main" className="calendar-main">
         <section className="calendar-center" aria-label="캘린더">
           <div className="calendar-toolbar"><div className="month-title"><div><p className="eyebrow">OUR DAYS, TOGETHER</p><h2>{searching ? "일정 검색" : activeView === "week" ? `${shortDate(weekStart(selected))} — ${shortDate(addDays(weekStart(selected), 6))}` : monthLabel(cursor)}</h2></div><div className="calendar-arrows"><button className="icon-button" onClick={() => move(-1)} aria-label={view === "week" ? "이전 주" : "이전 달"}><ChevronLeft size={18} /></button><button className="icon-button" onClick={() => move(1)} aria-label={view === "week" ? "다음 주" : "다음 달"}><ChevronRight size={18} /></button><button className="today-button" onClick={goToday}>오늘</button></div></div><div className="calendar-tools"><div className="view-segment" aria-label="캘린더 보기">{([ ["month", "월"], ["week", "주"], ["list", "목록"] ] as const).map(([value, label]) => <button key={value} className={activeView === value ? "active" : ""} aria-pressed={activeView === value} onClick={() => { setView(value); setQuery(""); }}>{label}</button>)}</div><button className="icon-button export-button" title="현재 보이는 일정 내보내기 (.ics)" aria-label="현재 보이는 일정 내보내기" disabled={!filtered.length} onClick={exportView}><ArrowDownToLine size={18} /></button><button className="primary-button toolbar-create" onClick={() => create()}><Plus size={17} />일정 만들기</button></div></div>
           <div className="calendar-subline"><span>{searching ? `앞으로 12개월에서 검색 · ${filtered.length}개 결과` : activeView === "week" ? "일주일의 흐름을 함께 살펴봐요." : `두 사람이 채워가는 ${Number(cursor.slice(5, 7))}월`}</span><span className={`sync-state ${connectionError && !isDemo ? "has-error" : ""}`}>{isDemo ? <><span className="status-dot" />예시 일정</> : loading ? <><LoaderCircle size={12} className="spin" />불러오는 중</> : connectionError ? <><AlertCircle size={12} />연결 확인 필요</> : <><CircleCheck size={12} />{lastRefreshed} 갱신<button className="tiny-icon-button" onClick={() => void refresh().catch(() => {})} aria-label="일정 새로고침"><RefreshCw size={11} /></button></>}</span></div>
+          <div className="mobile-calendar-filters" aria-label="표시할 일정">{OWNERS.map(owner => <button key={owner} className={`owner-${owner}`} aria-label={`${names[owner]} 일정 표시`} aria-pressed={filters[owner]} onClick={() => setFilters(old => ({ ...old, [owner]: !old[owner] }))}><span className="owner-dot" aria-hidden="true" /><span>{names[owner]}</span></button>)}</div>
           {!hasFilters ? <div className="filter-empty"><span>표시할 캘린더를 선택해주세요.</span><button className="text-button" onClick={() => setFilters(ALL_FILTERS)}>모두 보기</button></div> : null}
           {activeView === "month" ? <div className="month-calendar"><div className="weekday-row">{WEEKDAYS.map((day, index) => <span key={day} className={index === 0 ? "sunday" : index === 6 ? "saturday" : ""}>{day}</span>)}</div><div className="month-grid" style={{ gridTemplateRows: `repeat(${cells.length / 7}, minmax(110px, 1fr))` }} aria-label={monthLabel(cursor)}>{cells.map(date => {
             const dayEvents = filtered.filter(event => occursOn(event, date));
-            return <div key={date} className={`month-cell ${date.slice(0, 7) !== cursor.slice(0, 7) ? "outside-month" : ""} ${date === selected ? "selected-day" : ""} ${date === today ? "is-today" : ""}`}><button className="day-button" onClick={() => selectDate(date)} onDoubleClick={() => create(date)} aria-label={`${fullDate(date)}, 일정 ${dayEvents.length}개`} aria-pressed={date === selected} aria-current={date === today ? "date" : undefined}><span className={`day-number ${dayOfWeek(date) === 0 ? "sunday" : dayOfWeek(date) === 6 ? "saturday" : ""}`}>{dayNumber(date)}</span>{date === today ? <span className="today-label">오늘</span> : null}</button><div className="cell-events">{dayEvents.slice(0, 3).map(event => <button key={event.occurrenceId} className={`event-pill owner-${event.ownerScope} ${event.allDay ? "all-day-pill" : ""}`} onClick={() => { selectDate(date); setDetail(event); }} title={`${event.title} · ${names[event.ownerScope]}`}><span className="event-pill-dot" />{!event.allDay ? <span className="pill-time">{eventTime(event, date)}</span> : null}<span className="pill-title">{event.title}</span>{event.category === "anniversary" ? <Heart size={10} /> : null}</button>)}{dayEvents.length > 3 ? <button className="more-events" onClick={() => selectDate(date)}>+{dayEvents.length - 3}개 더</button> : null}</div><div className="mobile-event-dots" aria-hidden="true">{dayEvents.slice(0, 3).map(event => <i key={event.occurrenceId} className={`owner-${event.ownerScope}`} />)}{dayEvents.length > 3 ? <span>+</span> : null}</div></div>;
+            return <div key={date} className={`month-cell ${date.slice(0, 7) !== cursor.slice(0, 7) ? "outside-month" : ""} ${date === selected ? "selected-day" : ""} ${date === today ? "is-today" : ""}`}><button className="day-button" onClick={() => selectDate(date)} onDoubleClick={() => create(date)} aria-label={`${fullDate(date)}, 일정 ${dayEvents.length}개`} aria-pressed={date === selected} aria-current={date === today ? "date" : undefined}><span className={`day-number ${dayOfWeek(date) === 0 ? "sunday" : dayOfWeek(date) === 6 ? "saturday" : ""}`}>{dayNumber(date)}</span>{date === today ? <span className="today-label">오늘</span> : null}</button><div className="cell-events">{dayEvents.slice(0, 3).map(event => <button key={event.occurrenceId} className={`event-pill owner-${event.ownerScope} ${event.allDay ? "all-day-pill" : ""}`} onClick={() => { selectDate(date); setDetail(event); }} title={`${event.title} · ${names[event.ownerScope]}`} aria-label={`${fullDate(date)} · ${event.title} · ${names[event.ownerScope]} · ${eventTime(event, date)}`}><span className="event-pill-dot" aria-hidden="true" />{!event.allDay ? <span className="pill-time">{eventTime(event, date)}</span> : null}<span className="pill-title">{event.title}</span>{event.category === "anniversary" ? <Heart size={10} /> : null}</button>)}{dayEvents.length > 3 ? <button className="more-events more-events-desktop" aria-label={`${fullDate(date)} 전체 일정 ${dayEvents.length}개 보기`} onClick={() => showDayAgenda(date)}>+{dayEvents.length - 3}개 더</button> : null}{dayEvents.length > 2 ? <button className="more-events more-events-mobile" aria-label={`${fullDate(date)} 전체 일정 ${dayEvents.length}개 보기`} onClick={() => showDayAgenda(date)}>+{dayEvents.length - 2}개</button> : null}</div></div>;
           })}</div></div> : activeView === "week" ? <WeekView date={selected} today={today} events={filtered} names={names} onSelect={selectDate} onDetail={setDetail} onCreate={create} /> : <AgendaList events={searching ? filtered : monthEvents} names={names} today={today} searching={searching} onDetail={setDetail} onCreate={() => create()} onClear={() => setQuery("")} />}
           <div className="calendar-footer"><span><span className="small-heart">♡</span>일상을 나누는 가장 다정한 방법</span><span>한국 시간 · 서울</span></div>
         </section>
 
-        <aside className="day-agenda" aria-label={`${shortDate(selected)} 일정`}><div className="agenda-heading"><p className="eyebrow">{selected === today ? "TODAY’S MOMENTS" : "A DAY IN OUR LIFE"}</p><div className="agenda-date"><h2>{shortDate(selected)}</h2><span>{FULL_WEEKDAYS[dayOfWeek(selected)]}</span></div><p className="agenda-count">{selectedEvents.length ? `오늘의 약속 ${selectedEvents.length}개` : "여유를 담을 수 있는 하루"}</p></div><div className="agenda-content">{selectedEvents.length ? <div className="day-events">{selectedEvents.map(event => <button key={event.occurrenceId} className={`agenda-event owner-${event.ownerScope}`} onClick={() => setDetail(event)}><div className="agenda-event-time"><span className="timeline-dot" />{eventTime(event, selected)}{event.repeat !== "none" ? <Repeat2 size={12} /> : null}</div><div className="agenda-event-body"><span className="agenda-owner">{names[event.ownerScope]}<span>·</span>{CATEGORY_NAMES[event.category]}</span><h3>{event.title}</h3>{event.location ? <p><MapPin size={12} />{event.location}</p> : null}{event.note ? <span className="agenda-note">{event.note}</span> : null}</div></button>)}</div> : <EmptyState title="아직 정해진 일정이 없어요" subtitle={isDemo ? "이 날에 예시 일정을 더해보세요." : "함께할 작은 약속을 남겨보세요."} />}</div><button className="add-day-button" onClick={() => create()}><Plus size={16} />이날 일정 추가</button><div className="agenda-bottom">{upcomingAnniversary ? <div className="anniversary-note"><span className="anniversary-icon"><Heart size={19} strokeWidth={1.4} /></span><div><p>{isDemo ? "예시 기념일" : "다가오는 기념일"}</p><h3>{upcomingAnniversary.title}</h3><span>{shortDate(upcomingAnniversary.startDate)}</span></div><strong>{dayDistance(today, upcomingAnniversary.startDate) === 0 ? "D-day" : `D−${dayDistance(today, upcomingAnniversary.startDate)}`}</strong></div> : <div className="quiet-note"><Heart size={20} strokeWidth={1.3} /><p>함께하는 평범한 하루가<br />가장 특별한 날이 되도록.</p></div>}<p className="agenda-privacy"><Users size={12} />{isDemo ? "예시 일정은 실제로 공유되지 않아요" : "모든 일정은 우리 둘에게 보여요"}</p></div></aside>
+        <aside id="day-agenda" className="day-agenda" tabIndex={-1} aria-label={`${shortDate(selected)} 일정`}><div className="agenda-heading"><p className="eyebrow">{selected === today ? "TODAY’S MOMENTS" : "A DAY IN OUR LIFE"}</p><div className="agenda-date"><h2>{shortDate(selected)}</h2><span>{FULL_WEEKDAYS[dayOfWeek(selected)]}</span></div><p className="agenda-count">{selectedEvents.length ? `오늘의 약속 ${selectedEvents.length}개` : "여유를 담을 수 있는 하루"}</p></div><div className="agenda-content">{selectedEvents.length ? <div className="day-events">{selectedEvents.map(event => <button key={event.occurrenceId} className={`agenda-event owner-${event.ownerScope}`} onClick={() => setDetail(event)}><div className="agenda-event-time"><span className="timeline-dot" />{eventTime(event, selected)}{event.repeat !== "none" ? <Repeat2 size={12} /> : null}</div><div className="agenda-event-body"><span className="agenda-owner">{names[event.ownerScope]}<span>·</span>{CATEGORY_NAMES[event.category]}</span><h3>{event.title}</h3>{event.location ? <p><MapPin size={12} />{event.location}</p> : null}{event.note ? <span className="agenda-note">{event.note}</span> : null}</div></button>)}</div> : <EmptyState title="아직 정해진 일정이 없어요" subtitle={isDemo ? "이 날에 예시 일정을 더해보세요." : "함께할 작은 약속을 남겨보세요."} />}</div><button className="add-day-button" onClick={() => create()}><Plus size={16} />이날 일정 추가</button><div className="agenda-bottom">{upcomingAnniversary ? <div className="anniversary-note"><span className="anniversary-icon"><Heart size={19} strokeWidth={1.4} /></span><div><p>{isDemo ? "예시 기념일" : "다가오는 기념일"}</p><h3>{upcomingAnniversary.title}</h3><span>{shortDate(upcomingAnniversary.startDate)}</span></div><strong>{dayDistance(today, upcomingAnniversary.startDate) === 0 ? "D-day" : `D−${dayDistance(today, upcomingAnniversary.startDate)}`}</strong></div> : <div className="quiet-note"><Heart size={20} strokeWidth={1.3} /><p>함께하는 평범한 하루가<br />가장 특별한 날이 되도록.</p></div>}<p className="agenda-privacy"><Users size={12} />{isDemo ? "예시 일정은 실제로 공유되지 않아요" : "모든 일정은 우리 둘에게 보여요"}</p></div></aside>
       </main>
     </div>
-    <button className="mobile-create" onClick={() => create()} aria-label="새 일정 만들기"><Plus size={24} /></button>
+    <nav className="mobile-app-nav" aria-label="빠른 메뉴">
+      <button aria-current={activeView !== "list" ? "page" : undefined} onClick={() => showMobileView("month")}><CalendarDays size={22} /><span>달력</span></button>
+      <button aria-current={activeView === "list" ? "page" : undefined} onClick={() => showMobileView("list")}><List size={22} /><span>목록</span></button>
+      <button className="mobile-nav-create" onClick={() => create()} aria-label="새 일정 만들기"><Plus size={24} /><span>일정 추가</span></button>
+      <button onClick={openSettings}><Users size={22} /><span>{allConnected ? "우리 설정" : "짝꿍 초대"}</span></button>
+    </nav>
     {editor ? <EventEditor key={editor.event?.occurrenceId || `new-${editor.date}`} date={editor.date} event={editor.event} events={events} names={names} demo={isDemo} onSave={saveEvent} onClose={() => setEditor(null)} /> : null}
     {detail ? <EventDetail event={detail} names={names} demo={isDemo} onClose={() => setDetail(null)} onEdit={() => { setEditor({ date: detail.startDate, event: detail }); setDetail(null); }} onDelete={() => deleteEvent(detail)} /> : null}
-    {settings ? <CalendarSettings key={`${settings}-${snapshot?.household?.id || "new"}`} state={snapshot} initialTab={settings} initialCode={joinCode} connectionError={connectionError} requiresSignIn={requiresSignIn} demo={isDemo} onCreate={createHousehold} onUpdate={updateHousehold} onJoin={joinHousehold} onInvite={() => api<InviteLink>("/api/invites", { method: "POST", body: "{}" })} onRevoke={async () => { await api("/api/invites", { method: "DELETE", body: "{}" }); await refresh(true); }} onLive={() => { setMode("live"); setSettings(null); }} onDemo={() => setMode("demo")} onClose={() => setSettings(null)} /> : null}
+    {settings ? <CalendarSettings key={`${settings}-${snapshot?.household?.id || "new"}`} state={snapshot} initialTab={settings} initialCode={joinCode} connectionError={connectionError} requiresSignIn={requiresSignIn} loading={loading && !snapshot} demo={isDemo} onRetry={() => void refresh().catch(() => {})} onCreate={createHousehold} onUpdate={updateHousehold} onJoin={joinHousehold} onInvite={() => api<InviteLink>("/api/invites", { method: "POST", body: "{}" })} onRevoke={async () => { await api("/api/invites", { method: "DELETE", body: "{}" }); await refresh(true); }} onLive={showLive} onDemo={showDemo} onClose={() => setSettings(null)} /> : null}
     <div className={`toast ${toast ? "visible" : ""}`} role="status" aria-live="polite">{toast ? <><CircleCheck size={17} />{toast}</> : null}</div>
     <span className="sr-only" role="status">{loading && !isDemo ? "일정을 불러오는 중" : ""}</span>
   </div>;

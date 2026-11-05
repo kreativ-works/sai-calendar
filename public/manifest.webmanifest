@@ -3,7 +3,7 @@
   "short_name": "사이",
   "description": "각자의 하루, 함께하는 시간. 두 사람을 위한 공유 캘린더.",
   "lang": "ko",
-  "start_url": "/",
+  "start_url": "/app",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f7f7f5",

@@ -1,0 +1,204 @@
+/* Calendar controls remain reachable while the month can show readable titles. */
+.mobile-app-nav, .mobile-calendar-filters, .more-events-mobile { display: none; }
+.mobile-search-toggle { display: none; }
+/* Month labels always stay on one line; full titles remain in event details. */
+.month-cell .pill-title {
+  display: block;
+  min-width: 0;
+  max-height: 1.4em;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.settings-account { display: flex; align-items: center; gap: 12px; justify-content: space-between; margin-top: 16px; color: #736b80; font-size: 11px; }
+.settings-account > span { min-width: 0; overflow-wrap: anywhere; }
+.settings-account a { flex-shrink: 0; display: inline-flex; align-items: center; min-height: 44px; color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
+
+@media (max-width: 640px) {
+  .sai-app .app-workspace { padding-bottom: calc(78px + env(safe-area-inset-bottom)); }
+  .sai-app .app-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px auto;
+    gap: 8px 6px;
+    height: auto;
+    min-height: 68px;
+    padding: max(8px, env(safe-area-inset-top)) 12px 8px;
+  }
+  .sai-app .header-title-group { grid-column: 1; grid-row: 1; gap: 7px; }
+  .sai-app .header-title-group > div { min-width: 0; }
+  .sai-app .header-title-group h1 { overflow: hidden; text-overflow: ellipsis; }
+  .sai-app .header-title-group p { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sai-app .header-actions { display: contents; }
+  .sai-app .people-button { grid-column: 3; grid-row: 1; min-height: 44px; }
+  .sai-app .mobile-search-toggle { display: inline-flex; grid-column: 2; grid-row: 1; width: 44px; height: 44px; }
+  .sai-app .people-label { display: none; }
+  .sai-app .search-field {
+    display: none;
+    position: static;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    max-width: none;
+    min-height: 44px;
+    padding: 8px 12px;
+  }
+  .sai-app .has-search .search-field { display: flex; }
+  .sai-app .search-field input { font-size: 16px; }
+  .sai-app .search-field .tiny-icon-button { min-width: 28px; min-height: 28px; }
+  .sai-app .calendar-center { padding: 16px 8px 0; }
+  .sai-app .calendar-toolbar {
+    position: static;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    min-height: 0;
+    margin-bottom: 12px;
+    padding: 0 8px;
+  }
+  .sai-app .month-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .sai-app .month-title > div:first-child { flex: 1; min-width: 0; }
+  .sai-app .month-title .eyebrow { display: none; }
+  .sai-app .month-title h2 { font-size: 22px; white-space: normal; line-height: 1.35; }
+  .sai-app .calendar-arrows { margin-top: 0; flex-shrink: 0; }
+  .sai-app .calendar-arrows .icon-button { border-color: transparent; }
+  .sai-app .calendar-tools {
+    position: static;
+    width: 100%;
+    margin: 0;
+    justify-content: space-between;
+  }
+  .sai-app .view-segment { flex: 1; max-width: 230px; }
+  .sai-app .view-segment button { flex: 1; }
+  .sai-app .calendar-subline { padding: 0 8px 10px; font-size: 11px; }
+  .sai-app .sync-state { font-size: 10px; }
+  .sai-app .sync-state .tiny-icon-button { height: 28px; width: 28px; }
+  .sai-app .demo-banner p { max-width: none; }
+  .sai-app .demo-banner > button,
+  .sai-app .invite-banner > button,
+  .sai-app .connection-banner > button { min-height: 44px; font-size: 11px; }
+  .sai-app .desktop-copy { display: none; }
+  .sai-app .mobile-calendar-filters {
+    display: flex;
+    gap: 6px;
+    margin: 0 8px 12px;
+  }
+  .sai-app .mobile-calendar-filters button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #faf9fc;
+    color: #736b80;
+    font-size: 12px;
+  }
+  .sai-app .mobile-calendar-filters button[aria-pressed="true"] {
+    border-color: var(--owner-color);
+    color: var(--owner-color);
+    background: var(--owner-bg);
+  }
+  .sai-app .mobile-calendar-filters button > span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sai-app .weekday-row { height: 32px; }
+  .sai-app .month-grid { grid-auto-rows: minmax(104px, auto); }
+  .sai-app .month-cell { min-height: 104px; padding: 0 2px 4px; }
+  .sai-app .day-button { height: 36px; padding: 2px 0; }
+  .sai-app .day-button::after { content: none; }
+  .sai-app .day-number { font-size: 13px; }
+  .sai-app .cell-events { display: flex; gap: 3px; margin-top: 0; }
+  .sai-app .cell-events .event-pill {
+    min-height: 26px;
+    padding: 2px 2px 2px 3px;
+    border-radius: 3px;
+    border-left: 2px solid var(--owner-color);
+    font-size: 11px;
+    line-height: 13px;
+    letter-spacing: -.04em;
+    white-space: nowrap;
+    align-items: center;
+  }
+  .sai-app .cell-events .event-pill:nth-of-type(3) { display: none; }
+  .sai-app .pill-title {
+    display: block;
+    max-height: 13px;
+    line-height: 13px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .sai-app .cell-events .event-pill-dot,
+  .sai-app .cell-events .pill-time,
+  .sai-app .cell-events .event-pill > svg,
+  .sai-app .mobile-event-dots,
+  .sai-app .more-events-desktop { display: none; }
+  .sai-app .more-events-mobile {
+    display: block;
+    width: 100%;
+    min-height: 26px;
+    padding: 3px 1px;
+    font-size: 10px;
+    line-height: 16px;
+    color: #665075;
+    text-align: center;
+  }
+  .sai-app .calendar-footer { padding: 12px 8px 16px; font-size: 10px; }
+  .sai-app .day-agenda { padding: 24px 16px 28px; scroll-margin-top: 16px; }
+  .sai-app .mobile-create { display: none; }
+  .sai-app .mobile-app-nav {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 35;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    padding: 6px 12px calc(6px + env(safe-area-inset-bottom));
+    border-top: 1px solid #e9e3f0;
+    background: rgba(255, 255, 255, .97);
+    box-shadow: 0 -5px 24px #36234508;
+    backdrop-filter: blur(16px);
+  }
+  .sai-app .mobile-app-nav button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 58px;
+    border-radius: 12px;
+    padding: 6px 3px;
+    color: #736b80;
+    font-size: 11px;
+  }
+  .sai-app .mobile-app-nav button[aria-current="page"] { background: var(--primary-soft); color: var(--primary); }
+  .sai-app .mobile-app-nav .mobile-nav-create { color: var(--primary); font-weight: 650; }
+  .sai-app .mobile-app-nav .mobile-nav-create svg { border-radius: 8px; padding: 3px; background: var(--primary); color: white; width: 28px; height: 28px; }
+  .sai-app .toast { bottom: calc(88px + env(safe-area-inset-bottom)); font-size: 12px; }
+  .sai-app .field input, .sai-app .field select, .sai-app .field textarea,
+  .sai-app .date-input-row input, .sai-app .invite-url input { font-size: 16px; }
+  .sai-app .primary-button, .sai-app .secondary-button, .sai-app .danger-button,
+  .sai-app .owner-option, .sai-app .settings-tabs button { min-height: 44px; }
+  .sai-app .dialog-header .icon-button { width: 44px; height: 44px; min-width: 44px; }
+  .sai-app .list-event-info > strong { font-size: 14px; }
+  .sai-app .list-event-time, .sai-app .list-owner { font-size: 11px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .sai-app *, .sai-app *::before, .sai-app *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
