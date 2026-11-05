@@ -1,7 +1,7 @@
 "use client";
 
 import { getApp, getApps, initializeApp } from "firebase/app";
-import { connectAuthEmulator, getAuth, signOut, type Auth, type User } from "firebase/auth";
+import { connectAuthEmulator, getAuth, getRedirectResult, signOut, type Auth, type User, type UserCredential } from "firebase/auth";
 import { api } from "./api";
 
 export type AuthConfiguration = {
@@ -19,6 +19,7 @@ export type SessionResult = {
 let configurationPromise: Promise<AuthConfiguration> | null = null;
 let authPromise: Promise<Auth | null> | null = null;
 let emulatorConnected = false;
+const redirectResults = new WeakMap<Auth, Promise<UserCredential | null>>();
 
 export function normalizeReturnTo(value: string | null | undefined): string {
   if (!value || !value.startsWith("/") || value.startsWith("//") || /[\\\u0000-\u001f]/.test(value)) return "/app";
@@ -67,6 +68,23 @@ export function getFirebaseAuth(): Promise<Auth | null> {
   return authPromise;
 }
 
+export function usesSameOriginGoogleRedirect(auth: Auth, config: AuthConfiguration): boolean {
+  if (typeof window === "undefined" || config.emulatorUrl || window.location.protocol !== "https:") return false;
+  if (["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)) return false;
+  // A same-origin authDomain requires the production /__/auth/* helper proxy.
+  // Never switch a third-party Firebase authDomain to redirect automatically.
+  return config.firebase?.authDomain === window.location.host && auth.app.options.authDomain === window.location.host;
+}
+
+export function consumeGoogleRedirectResult(auth: Auth): Promise<UserCredential | null> {
+  let result = redirectResults.get(auth);
+  if (!result) {
+    result = getRedirectResult(auth);
+    redirectResults.set(auth, result);
+  }
+  return result;
+}
+
 export async function syncServerSession(user: User, forceRefresh = false): Promise<SessionResult> {
   const idToken = await user.getIdToken(forceRefresh);
   return api<SessionResult>("/api/auth/session", { method: "POST", body: JSON.stringify({ idToken }) });
@@ -109,6 +127,9 @@ export function authErrorMessage(error: unknown): string {
     "auth/invalid-action-code": "이미 사용했거나 유효하지 않은 링크예요. 새 메일을 요청해주세요.",
     "auth/requires-recent-login": "안전을 위해 다시 로그인해주세요.",
     "auth/web-storage-unsupported": "브라우저 저장소를 사용할 수 없어요. Safari·Chrome의 일반 창에서 다시 열어주세요.",
+    "auth/redirect-cancelled-by-user": "Google 로그인이 완료되지 않았어요. 다시 시도하거나 이메일로 로그인해주세요.",
+    "auth/redirect-operation-pending": "이 브라우저에서 Google 로그인을 진행 중이에요. 잠시 후 로그인 화면을 다시 열어주세요.",
+    "auth/unsupported-persistence-type": "로그인 상태를 저장할 수 없어요. Safari·Chrome의 일반 창에서 다시 열어주세요.",
   };
   if (messages[code]) return messages[code];
   if (error instanceof Error && !code.startsWith("auth/")) return error.message;

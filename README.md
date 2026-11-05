@@ -8,7 +8,7 @@
 
 접속 화면과 예시 둘러보기는 공개되어 있습니다. 실제 일정은 로그인한 뒤 초대로 연결한 두 계정만 조회할 수 있습니다. **나·짝꿍·함께는 두 사람 모두에게 보이는 일정 구분**입니다.
 
-현재 소스는 **Firebase Authentication의 이메일·비밀번호 및 Google 로그인으로 전환 중**입니다. 가입·이메일 확인·비밀번호 재설정·세션 연결은 로컬 Emulator에서 검증했습니다. 운영 Firebase 프로젝트와 Google 제공자 설정 및 배포 완료 여부는 별도로 확인해야 하며, 이 문서는 새 인증이 운영 사이트에 이미 반영되었다는 의미가 아닙니다.
+운영 사이트는 **Firebase Authentication의 이메일·비밀번호 및 Google 로그인**을 사용합니다. 가입·이메일 확인·세션 연결은 로컬 Auth Emulator에서 검증했고, 운영 배포 후 공개 접속과 보호 페이지의 로그인 이동, 익명·잘못된 토큰의 API 차단을 확인했습니다. 실제 메일 수신 및 Google 계정의 최종 로그인 검증 범위는 아래 배포 안내를 확인하세요.
 
 ## 주요 기능
 
@@ -102,7 +102,7 @@ npm test
 npm run typecheck
 ```
 
-단위 테스트 **18개**는 캘린더 날짜·반복 로직 12개와 서명된 Firebase 토큰·계정 상태 검증 6개입니다. Auth Emulator → 개발 Worker → D1 통합 검증 **17개**는 이메일 확인, Google 모의 로그인, 두 계정 공유, 초대, 재설정 후 세션 거부, CSRF, 기존 계정의 명시적 연결과 동시 연결 충돌을 확인합니다. 구현 시 이 검증을 통과했습니다. 운영 Google OAuth와 실제 메일 수신 검증을 대신하지는 않습니다.
+단위 테스트는 캘린더 날짜·반복 로직, 서명된 Firebase 토큰·계정 상태, 인증 helper 프록시의 요청 경계와 쿠키 제외를 검증합니다. Auth Emulator → 개발 Worker → D1 통합 검증 **17개**는 이메일 확인, Google 모의 로그인, 두 계정 공유, 초대, 토큰 폐기 후 세션 거부, CSRF, 기존 계정의 명시적 연결과 동시 연결 충돌을 확인합니다. 구현 시 이 검증을 통과했습니다. 운영 Google OAuth와 실제 메일 수신 검증을 대신하지는 않습니다.
 
 통합 검증에는 위의 `.dev.vars`, 두 DB 마이그레이션, Auth Emulator 및 `npm run dev`가 필요합니다. `.wrangler/state` 아래에서 **현재 DB의 `.sqlite` 파일**을 찾습니다. `metadata.sqlite`를 선택하지 마세요.
 
@@ -129,7 +129,7 @@ npm run test:integration -- http://127.0.0.1:5173 http://127.0.0.1:9099 --legacy
 | 환경 변수 | Firebase 웹 앱 설정 |
 | --- | --- |
 | `SAI_FIREBASE_API_KEY` | `apiKey` |
-| `SAI_FIREBASE_AUTH_DOMAIN` | `authDomain` |
+| `SAI_FIREBASE_AUTH_DOMAIN` | 운영 사이트 호스트. 현재 `sai-our-calendar.seonguk.chatgpt.site` |
 | `SAI_FIREBASE_PROJECT_ID` | `projectId` |
 | `SAI_FIREBASE_APP_ID` | `appId` |
 
@@ -143,7 +143,9 @@ npm run test:integration -- http://127.0.0.1:5173 http://127.0.0.1:9099 --legacy
 4. 이메일 템플릿의 custom action URL을 `https://sai-our-calendar.seonguk.chatgpt.site/auth/action`으로 설정하고 실제 확인·재설정 메일을 검증합니다.
 5. D1에 `0001` 인증 연결 마이그레이션을 적용하고 네 설정값과 앱을 같은 Firebase 프로젝트로 배포합니다.
 
-현재 Google 로그인은 클릭에서 바로 여는 팝업 방식입니다. 팝업 차단·웹뷰 오류에는 이메일 로그인이나 Safari·Chrome에서 열기를 안내합니다. 다른 도메인의 Firebase redirect 로그인으로 자동 전환하지 않습니다. 모바일 redirect를 추가하려면 Firebase의 동일 도메인 프록시 등 별도 설정이 필요합니다.
+운영 Google 로그인은 같은 창에서 인증하고 돌아오는 redirect 방식입니다. `authDomain`을 앱 호스트로 설정하고, 동일 출처의 `/__/auth/*`를 고정된 Firebase 프로젝트로 프록시합니다. Google OAuth 웹 클라이언트에 앱의 JavaScript 원본과 `https://sai-our-calendar.seonguk.chatgpt.site/__/auth/handler`를 허용된 리디렉션 주소로 등록해야 합니다. 프록시는 사이트의 쿠키·Authorization·Sites 신원 헤더·Referer를 전달하지 않으며 응답을 캐시하지 않습니다. 로컬·에뮬레이터 또는 다른 authDomain 설정에서는 팝업을 유지합니다. Google 연결이 늦어지면 사용자가 전체 페이지를 다시 시작하거나 이메일 로그인을 선택할 수 있습니다.
+
+Google 로그인 설정과 실제 계정의 OAuth 완료, 확인·재설정 메일 수신은 서로 다른 검증 단계입니다. 로컬 모의 계정 검증만으로 운영 OAuth나 메일 전달 성공을 보장하지 않습니다.
 
 서버는 ID 토큰의 Google 서명, 프로젝트·사용자·유효 시간·이메일 확인 상태를 검증하고 Firebase 계정 조회로 정지·삭제·토큰 폐기를 확인합니다. 세션 쿠키는 호스트 한정, HttpOnly, SameSite=Lax이며 HTTPS에서 Secure입니다. 쿠키 수명은 ID 토큰의 남은 시간 이내, 최대 1시간이고 클라이언트가 갱신합니다. API마다 D1 membership을 다시 확인합니다.
 

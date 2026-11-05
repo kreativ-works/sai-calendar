@@ -3,9 +3,9 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, CalendarDays, Check, CheckCircle2, Eye, EyeOff, Heart, LoaderCircle, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
-import { applyActionCode, checkActionCode, confirmPasswordReset, createUserWithEmailAndPassword, GoogleAuthProvider, reload, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, updateProfile, verifyPasswordResetCode, type Auth, type User } from "firebase/auth";
+import { applyActionCode, checkActionCode, confirmPasswordReset, createUserWithEmailAndPassword, GoogleAuthProvider, reload, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, updateProfile, verifyPasswordResetCode, type Auth, type User } from "firebase/auth";
 import { api, ApiError } from "@/lib/client/api";
-import { authErrorMessage, authPageHref, getAuthConfiguration, getFirebaseAuth, logout, normalizeReturnTo, syncServerSession, type AuthConfiguration } from "@/lib/client/firebase-auth";
+import { authErrorMessage, authPageHref, consumeGoogleRedirectResult, getAuthConfiguration, getFirebaseAuth, logout, normalizeReturnTo, syncServerSession, usesSameOriginGoogleRedirect, type AuthConfiguration } from "@/lib/client/firebase-auth";
 
 export type AuthScreenProps = {
   mode: "login" | "signup" | "forgot" | "action";
@@ -46,6 +46,8 @@ export default function AuthScreen({ mode, returnTo: rawReturnTo, actionCode, ac
   const [notice, setNotice] = useState("");
   const [resendAfter, setResendAfter] = useState(0);
   const [reauthenticating, setReauthenticating] = useState(false);
+  const [googlePending, setGooglePending] = useState(false);
+  const [googleSlow, setGoogleSlow] = useState(false);
   const mounted = useRef(true);
   const errorRef = useRef<HTMLParagraphElement>(null);
   const ready = !loading && !!auth && !!configuration?.configured;
@@ -81,6 +83,8 @@ export default function AuthScreen({ mode, returnTo: rawReturnTo, actionCode, ac
         if (!instance) return;
         await instance.authStateReady();
         if (cancelled) return;
+        const redirectCredential = mode === "login" || mode === "signup" ? await consumeGoogleRedirectResult(instance) : null;
+        if (cancelled) return;
         if (mode === "action") {
           if (!actionCode) throw new Error("메일의 링크가 올바르지 않아요. 새 메일을 요청해주세요.");
           if (actionMode === "resetPassword") {
@@ -108,10 +112,12 @@ export default function AuthScreen({ mode, returnTo: rawReturnTo, actionCode, ac
             // Sending a password reset remains an explicit user action.
             await logout();
           } else throw new Error("이 링크를 처리할 수 없어요. 로그인 화면에서 다시 시작해주세요.");
-        } else if (mode !== "forgot" && instance.currentUser) {
+        } else if (mode !== "forgot" && (redirectCredential?.user || instance.currentUser)) {
           // Reload after opening an email verification link in a different tab.
-          await reload(instance.currentUser);
-          if (!cancelled) await finishSignIn(instance.currentUser, true);
+          const user = redirectCredential?.user || instance.currentUser;
+          if (!user) return;
+          await reload(user);
+          if (!cancelled) await finishSignIn(user, true);
         }
       } catch (cause) {
         if (!cancelled) {
@@ -127,6 +133,11 @@ export default function AuthScreen({ mode, returnTo: rawReturnTo, actionCode, ac
   }, [mode, actionCode, actionMode, returnTo]);
 
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
+  useEffect(() => {
+    if (!googlePending) return;
+    const timer = window.setTimeout(() => setGoogleSlow(true), 12_000);
+    return () => window.clearTimeout(timer);
+  }, [googlePending]);
   useEffect(() => {
     if (!resendAfter) return;
     const timer = window.setInterval(() => setResendAfter(previous => Math.max(0, previous - 1)), 1000);
@@ -183,15 +194,25 @@ export default function AuthScreen({ mode, returnTo: rawReturnTo, actionCode, ac
 
   function googleSignIn() {
     if (!auth || disabled || !configuration?.providers.google) return;
-    setBusy(true); setError(""); setNotice("");
+    setBusy(true); setGooglePending(true); setGoogleSlow(false); setError(""); setNotice("");
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
-    // Invoke directly from the user gesture. Redirect fallback on a different authDomain
-    // can fail in Safari and browsers that partition third-party storage.
-    const popup = signInWithPopup(auth, provider);
-    void popup.then(credential => finishSignIn(credential.user)).catch(cause => {
+    // Production uses a full-page flow only after the auth helpers share our origin.
+    // Other configurations retain a directly invoked popup; no automatic fallback races.
+    const sameOriginRedirect = usesSameOriginGoogleRedirect(auth, configuration);
+    if (sameOriginRedirect) {
+      // A legacy reauthentication may have started from an already consumed email action.
+      // Return to a clean auth route while retaining the invitation destination.
+      window.history.replaceState(window.history.state, "", authPageHref(isSignup ? "/signup" : "/login", returnTo));
+    }
+    const result = sameOriginRedirect
+      ? signInWithRedirect(auth, provider)
+      : signInWithPopup(auth, provider);
+    void result.then(credential => credential ? finishSignIn(credential.user) : undefined).catch(cause => {
       if (mounted.current) setError(authErrorMessage(cause));
-    }).finally(() => { if (mounted.current) setBusy(false); });
+    }).finally(() => {
+      if (mounted.current) { setBusy(false); setGooglePending(false); setGoogleSlow(false); }
+    });
   }
 
   function connectLegacyCalendar() {
@@ -227,7 +248,7 @@ export default function AuthScreen({ mode, returnTo: rawReturnTo, actionCode, ac
 
       {loading ? <div className="auth-loading" role="status"><LoaderCircle size={20} className="spin" />안전한 연결을 확인하고 있어요…</div> : !ready ? <div className="auth-service-notice" role="status"><ShieldCheck size={20} /><div><strong>로그인 서비스를 준비하고 있어요</strong><p>연결이 완료되면 이메일과 Google 계정으로 바로 시작할 수 있어요. 잠시 후 다시 방문해주세요.</p><button type="button" onClick={() => window.location.reload()}>다시 확인하기</button></div></div> : null}
 
-      {showSocial ? <><button type="button" className="auth-google" disabled={disabled || !configuration?.providers.google} onClick={googleSignIn}><GoogleMark />Google로 계속하기{busy ? <LoaderCircle className="spin" size={16} /> : null}</button><div className="auth-divider"><span>또는 이메일로</span></div></> : null}
+      {showSocial ? <><button type="button" className="auth-google" disabled={disabled || !configuration?.providers.google} onClick={googleSignIn}><GoogleMark />Google로 계속하기{googlePending ? <LoaderCircle className="spin" size={16} /> : null}</button>{googleSlow ? <div className="auth-google-help" role="status"><strong>로그인 화면이 열리지 않나요?</strong><p>인앱 브라우저에서는 Google 로그인이 제한될 수 있어요. Safari·Chrome에서 열거나 이메일로 다시 시작해주세요.</p><a href={`${authPageHref("/login", returnTo)}&method=email`} target="_top">이메일 로그인으로 다시 시작<ArrowRight size={14} /></a><a href={authPageHref(isSignup ? "/signup" : "/login", returnTo)} target="_top">로그인 화면 다시 열기</a></div> : null}<div className="auth-divider"><span>또는 이메일로</span></div></> : null}
 
       {showMainForm || panel === "reset" ? <form onSubmit={submit} className="auth-form" aria-busy={busy}>
         {isSignup && panel === "form" ? <div className="auth-field"><label htmlFor={`${id}-name`}>이름</label><input id={`${id}-name`} type="text" autoComplete="nickname" autoFocus required maxLength={24} value={name} onChange={event => setName(event.target.value)} placeholder="불리고 싶은 이름" disabled={disabled} /></div> : null}
