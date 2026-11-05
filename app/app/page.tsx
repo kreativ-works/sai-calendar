@@ -1,5 +1,7 @@
 import CalendarApp from "@/components/calendar/calendar-app";
-import { getChatGPTUser, requireChatGPTUser } from "../chatgpt-auth";
+import SessionBridge from "@/components/auth/session-bridge";
+import { getAppUser } from "@/lib/server/app-auth";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 export const metadata = { robots: { index: false, follow: false } };
@@ -15,12 +17,12 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
   if (params.setup === "1" || params.setup === "join") preserved.set("setup", params.setup);
   if (initialJoinCode) preserved.set("join", initialJoinCode);
   const returnTo = `/app${preserved.size ? `?${preserved.toString()}` : ""}`;
-  // Authentication runs in a nested component after the complete return path is
-  // computed, preserving a partner's invite through dispatch-owned sign-in.
+  // Preserve invitations and onboarding across an ordinary account sign-in.
   return <CalendarAccess initialDemo={initialDemo} initialSetup={initialSetup} initialJoinCode={initialJoinCode} returnTo={returnTo} />;
 }
 
 async function CalendarAccess({ initialDemo, initialSetup, initialJoinCode, returnTo }: { initialDemo: boolean; initialSetup: Setup; initialJoinCode: string; returnTo: string }) {
-  const user = initialDemo ? await getChatGPTUser() : await requireChatGPTUser(returnTo);
-  return <CalendarApp initialDemo={initialDemo} initialSetup={initialSetup} initialJoinCode={initialJoinCode} signedIn={!!user} />;
+  const user = await getAppUser();
+  if (!initialDemo && !user) redirect(`/login?returnTo=${encodeURIComponent(returnTo)}`);
+  return <>{user && !initialDemo ? <SessionBridge /> : null}<CalendarApp initialDemo={initialDemo} initialSetup={initialSetup} initialJoinCode={initialJoinCode} signedIn={!!user} /></>;
 }

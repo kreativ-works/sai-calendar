@@ -82,7 +82,7 @@ export default function CalendarApp({ initialDemo = false, initialSetup = null, 
       }
       throw error;
     } finally { if (id === requestId.current) setLoading(false); }
-  }, [from, to, initialDemo, initialSetup, initialJoinCode]);
+  }, [from, to, initialSetup, initialJoinCode]);
 
   // These effects hydrate external URL/storage/API state after SSR, avoiding a different first client render.
   /* eslint-disable react-hooks/set-state-in-effect */

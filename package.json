@@ -7,7 +7,7 @@
   },
   "scripts": {
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
-    "test:integration": "node scripts/smoke-calendar.mjs",
+    "test:integration": "node scripts/smoke-firebase-auth.mjs",
     "typecheck": "tsc --noEmit",
     "install:ci": "node scripts/install-ci.mjs",
     "dev": "node scripts/run-framework.mjs dev",
@@ -26,7 +26,9 @@
     "date-fns": "^4.4.0",
     "drizzle-orm": "0.45.2",
     "embla-carousel-react": "^8.6.0",
+    "firebase": "^13.2.0",
     "input-otp": "^1.4.2",
+    "jose": "^6.2.15",
     "lucide-react": "^1.31.0",
     "next": "16.3.4",
     "next-themes": "^0.4.6",

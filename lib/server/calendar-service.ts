@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
-import { getChatGPTUser, type ChatGPTUser } from "../../app/chatgpt-auth";
+import { getAppUser, type AppUser } from "./app-auth";
+import { getFirebaseConfig } from "./firebase-config";
 import {
   CalendarError, boundedText, expandEvents, parseEvent, parseHousehold,
   parseRange, parseRevision, type CalendarState, type MemberSlot,
@@ -19,6 +20,12 @@ type EventRow = {
 export function database(): D1Database {
   if (!env.DB) throw new CalendarError(503, "DATABASE_UNAVAILABLE", "공유 저장소를 연결하는 중이에요. 잠시 후 다시 시도해 주세요.");
   return env.DB;
+}
+
+function identityProvider(): string {
+  const config = getFirebaseConfig();
+  if (!config) throw new CalendarError(503, "AUTH_NOT_CONFIGURED", "로그인 서비스를 준비하고 있어요. 잠시 후 다시 방문해 주세요.");
+  return `firebase:${config.projectId}`;
 }
 
 function json(value: unknown, status = 200): Response {
@@ -60,9 +67,9 @@ export async function api(action: () => Promise<unknown>, request: Request): Pro
   }
 }
 
-async function context(request: Request, requireMember = true): Promise<{ db: D1Database; user: ChatGPTUser; member: MemberRow | null }> {
-  const user = await getChatGPTUser();
-  if (!user) throw new CalendarError(401, "SIGN_IN_REQUIRED", "ChatGPT로 로그인하면 두 분의 일정을 안전하게 저장할 수 있어요.");
+async function context(request: Request, requireMember = true): Promise<{ db: D1Database; user: AppUser; member: MemberRow | null }> {
+  const user = await getAppUser();
+  if (!user) throw new CalendarError(401, "SIGN_IN_REQUIRED", "로그인하면 두 분의 일정을 안전하게 저장할 수 있어요.");
   if (request.method !== "GET" && request.method !== "HEAD") {
     const origin = request.headers.get("origin");
     if (origin && origin !== new URL(request.url).origin) throw new CalendarError(403, "ORIGIN_DENIED", "이 캘린더 화면에서 다시 시도해 주세요.");
@@ -126,11 +133,16 @@ export async function createHousehold(request: Request): Promise<{ ok: true }> {
   const profile = parseHousehold(await body(request));
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
+  const provider = identityProvider();
   try {
-    await db.batch([
-      db.prepare("INSERT INTO households (id, name, a_name, b_name, anniversary, revision, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)").bind(id, profile.name, profile.aName, profile.bName, profile.anniversary, now),
-      db.prepare("INSERT INTO members (user_id, household_id, slot, email, joined_at) VALUES (?, ?, 'a', ?, ?)").bind(user.userId, id, user.email, now),
+    // Legacy linking can repoint this identity after context() returns. Check the
+    // mapping in the same atomic batch as membership creation so a stale request
+    // cannot create an inaccessible calendar under the previous canonical ID.
+    const results = await db.batch([
+      db.prepare("INSERT INTO households (id, name, a_name, b_name, anniversary, revision, created_at) SELECT ?, ?, ?, ?, ?, 1, ? WHERE EXISTS (SELECT 1 FROM auth_identities WHERE provider = ? AND user_id = ?)").bind(id, profile.name, profile.aName, profile.bName, profile.anniversary, now, provider, user.userId),
+      db.prepare("INSERT INTO members (user_id, household_id, slot, email, joined_at) SELECT ?, id, 'a', ?, ? FROM households WHERE id = ?").bind(user.userId, user.email, now, id),
     ]);
+    if (!results[0].meta.changes || !results[1].meta.changes) throw new CalendarError(409, "IDENTITY_CHANGED", "계정 연결 상태가 바뀌었어요. 새로고침한 뒤 다시 시도해 주세요.");
   } catch (error) {
     const existing = await db.prepare("SELECT user_id FROM members WHERE user_id = ?").bind(user.userId).first();
     if (existing) throw new CalendarError(409, "ALREADY_CONNECTED", "이미 캘린더가 만들어졌어요. 새로고침해 주세요.");
@@ -244,10 +256,12 @@ export async function joinInvite(request: Request): Promise<{ ok: true }> {
   const now = new Date().toISOString();
   const invitation = await db.prepare("SELECT id, household_id FROM invitations WHERE code_hash = ? AND revoked_at IS NULL AND used_at IS NULL AND expires_at > ?").bind(hash, now).first<{ id: string; household_id: string }>();
   if (!invitation) throw new CalendarError(422, "INVALID_INVITE", "초대 코드가 만료되었거나 사용할 수 없어요. 파트너에게 새 코드를 요청해 주세요.");
+  const provider = identityProvider();
   try {
     const results = await db.batch([
-      db.prepare("INSERT INTO members (user_id, household_id, slot, email, joined_at) SELECT ?, household_id, 'b', ?, ? FROM invitations WHERE id = ? AND revoked_at IS NULL AND used_at IS NULL AND expires_at > ? AND NOT EXISTS (SELECT 1 FROM members WHERE household_id = invitations.household_id AND slot = 'b')")
-        .bind(user.userId, user.email, now, invitation.id, now),
+      // A simultaneous legacy link must not consume an invite for the old ID.
+      db.prepare("INSERT INTO members (user_id, household_id, slot, email, joined_at) SELECT ?, household_id, 'b', ?, ? FROM invitations WHERE id = ? AND revoked_at IS NULL AND used_at IS NULL AND expires_at > ? AND NOT EXISTS (SELECT 1 FROM members WHERE household_id = invitations.household_id AND slot = 'b') AND EXISTS (SELECT 1 FROM auth_identities WHERE provider = ? AND user_id = ?)")
+        .bind(user.userId, user.email, now, invitation.id, now, provider, user.userId),
       db.prepare("UPDATE invitations SET used_at = ? WHERE id = ? AND EXISTS (SELECT 1 FROM members WHERE user_id = ? AND household_id = invitations.household_id AND slot = 'b')").bind(now, invitation.id, user.userId),
     ]);
     if (!results[0].meta.changes) throw new CalendarError(409, "INVITE_UNAVAILABLE", "이미 사용되었거나 취소된 초대예요. 새 초대 코드를 요청해 주세요.");

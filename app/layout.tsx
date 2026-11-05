@@ -3,6 +3,7 @@ import "./globals.css";
 import "./mobile-refinements.css";
 import "./mobile-first.css";
 import "./landing.css";
+import "./auth.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://sai-our-calendar.seonguk.chatgpt.site"),

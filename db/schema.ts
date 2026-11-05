@@ -48,3 +48,15 @@ export const invitations = sqliteTable("invitations", {
   createdBy: text("created_by").notNull(),
   createdAt: text("created_at").notNull(),
 }, (table) => [index("invitations_household").on(table.householdId)]);
+
+// Firebase subject is scoped to a project. Canonical IDs remain stable when an
+// existing member explicitly connects a new identity to their previous account.
+export const authIdentities = sqliteTable("auth_identities", {
+  provider: text("provider").notNull(),
+  subject: text("subject").notNull(),
+  userId: text("user_id").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("auth_identities_provider_subject").on(table.provider, table.subject),
+  uniqueIndex("auth_identities_provider_user").on(table.provider, table.userId),
+]);

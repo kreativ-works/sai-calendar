@@ -8,6 +8,8 @@
 
 접속 화면과 예시 둘러보기는 공개되어 있습니다. 실제 일정은 로그인한 뒤 초대로 연결한 두 계정만 조회할 수 있습니다. **나·짝꿍·함께는 두 사람 모두에게 보이는 일정 구분**입니다.
 
+현재 소스는 **Firebase Authentication의 이메일·비밀번호 및 Google 로그인으로 전환 중**입니다. 가입·이메일 확인·비밀번호 재설정·세션 연결은 로컬 Emulator에서 검증했습니다. 운영 Firebase 프로젝트와 Google 제공자 설정 및 배포 완료 여부는 별도로 확인해야 하며, 이 문서는 새 인증이 운영 사이트에 이미 반영되었다는 의미가 아닙니다.
+
 ## 주요 기능
 
 - 모바일 하단 메뉴, 바로 쓰는 사람별 필터, 필요할 때 펼치는 검색
@@ -25,7 +27,11 @@
 ## 화면과 시작 흐름
 
 - `/`: 공개 랜딩 페이지와 사용 안내
-- `/start`: ChatGPT 로그인 후 `/app?setup=1`로 이동
+- `/start`: 가입 화면을 거쳐 `/app?setup=1`로 이동. 이미 로그인했다면 바로 시작합니다.
+- `/signup`, `/login`: 이메일 또는 Google 계정으로 가입·로그인
+- `/forgot-password`: 비밀번호 재설정 메일 요청
+- `/auth/action`: 이메일 확인·비밀번호 재설정·이메일 변경 복구
+- `/logout`: 브라우저의 Firebase 로그인과 서버 세션을 함께 종료
 - `/app`: 내 캘린더. 새 사용자는 생성 폼이 자동으로 열립니다.
 - `/app?demo=1`: 로그인 없이 사용할 수 있는 예시 캘린더
 - `/app?setup=join`: 초대 코드를 입력해 연결
@@ -41,21 +47,53 @@ npm run install:ci
 npm run build
 ```
 
-로컬 데이터베이스가 처음 만들어졌다면 초기 스키마를 **한 번만** 적용합니다.
+로컬 데이터베이스가 처음 만들어졌다면 두 마이그레이션을 순서대로 **한 번만** 적용합니다. 기존 초기 스키마가 있는 환경에서는 `0001`만 추가합니다. `0001`은 기존 캘린더·일정·멤버를 지우지 않고 인증 연결 테이블을 추가합니다.
 
 ```sh
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_tan_randall_flagg.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_amazing_jetstream.sql
 ```
 
-개발 서버를 시작합니다.
+개인 Firebase 프로젝트 없이 테스트하려면 아래의 **로컬 Auth Emulator**를 먼저 설정한 뒤 개발 서버를 시작합니다.
 
 ```sh
 npm run dev
 ```
 
-브라우저에서 http://127.0.0.1:5173 에 접속합니다. 개발 환경에서는 `/signin-with-chatgpt?return_to=/` 경로로 모의 로그인할 수 있습니다. 모의 로그인은 개발 전용이며 운영 인증으로 사용할 수 없습니다.
+브라우저에서 http://127.0.0.1:5173 에 접속합니다. 인증 설정을 바꿨다면 개발 서버를 다시 시작합니다. 일반 캘린더 로그인은 `/login`을 사용합니다. 기존 Sites 모의 로그인만으로 새 인증 API를 통과할 수 없습니다.
 
-로컬 데이터베이스는 `.wrangler/`에 생성되며 운영 서비스의 데이터베이스와 분리됩니다. 이 저장소에는 실제 사용자의 일정, 계정 데이터, 초대 코드, 로컬 DB, 인증 토큰이 포함되어 있지 않습니다. `.openai/hosting.json`에는 로컬 실행에 필요한 바인딩 설정만 있고 운영 프로젝트 ID는 없습니다.
+로컬 데이터베이스는 `.wrangler/`에 생성되며 운영 서비스의 데이터베이스와 분리됩니다. `.dev.vars*`, `.env*`, `.wrangler/`, 빌드 결과는 Git에서 제외됩니다. 실제 사용자 데이터, 토큰, 로컬 DB, 서비스 계정 키를 공개 저장소에 올리지 마세요.
+
+### 로컬 Auth Emulator
+
+저장소 루트의 **추적하지 않는** `.dev.vars`에 아래 테스트용 설정을 작성합니다. 모두 가짜 로컬 값입니다.
+
+```dotenv
+SAI_FIREBASE_API_KEY="fake-api-key"
+SAI_FIREBASE_AUTH_DOMAIN="demo-sai-calendar.firebaseapp.com"
+SAI_FIREBASE_PROJECT_ID="demo-sai-calendar"
+SAI_FIREBASE_APP_ID="1:000000000000:web:demo-sai-calendar"
+SAI_FIREBASE_AUTH_EMULATOR_URL="http://127.0.0.1:9099"
+```
+
+Auth 전용 Emulator는 Java가 필요하지 않습니다. 로컬 `firebase.json`에 다음 구성을 두고 별도 터미널에서 실행합니다. `demo-` 프로젝트는 실제 클라우드 프로젝트에 접속하지 않습니다.
+
+```json
+{
+  "emulators": {
+    "auth": { "host": "127.0.0.1", "port": 9099 },
+    "ui": { "enabled": false }
+  }
+}
+```
+
+```sh
+npx firebase-tools@latest emulators:start --only auth --project demo-sai-calendar
+```
+
+이메일 확인·비밀번호 재설정 링크는 실제 메일 대신 Emulator 터미널이나 로컬 OOB API에서 확인합니다. Google 테스트도 모의 제공자입니다. 실제 Google 계정의 동의 화면·메일 배달·모바일 팝업 동작은 운영 프로젝트에서 별도로 검증해야 합니다.
+
+unsigned Emulator 토큰 허용은 개발 빌드이고 앱·Emulator 주소가 모두 loopback일 때만 가능합니다. **운영 환경에 `SAI_FIREBASE_AUTH_EMULATOR_URL`을 설정하지 마세요.** 운영 빌드는 이 경로를 비활성화하고 Google 서명 검증을 요구합니다.
 
 ## 검증
 
@@ -64,27 +102,64 @@ npm test
 npm run typecheck
 ```
 
-도메인 테스트 12개는 날짜·시간 검증, 반복 일정, 조회 범위, 겹치는 시간을 확인합니다. API 통합 검증 16개는 인증, 초대와 두 계정의 공유, 중복 요청, 수정 충돌, 삭제, 다른 공간의 접근 차단을 확인합니다. 구현 시 두 검증을 모두 통과했습니다.
+단위 테스트 **18개**는 캘린더 날짜·반복 로직 12개와 서명된 Firebase 토큰·계정 상태 검증 6개입니다. Auth Emulator → 개발 Worker → D1 통합 검증 **17개**는 이메일 확인, Google 모의 로그인, 두 계정 공유, 초대, 재설정 후 세션 거부, CSRF, 기존 계정의 명시적 연결과 동시 연결 충돌을 확인합니다. 구현 시 이 검증을 통과했습니다. 운영 Google OAuth와 실제 메일 수신 검증을 대신하지는 않습니다.
 
-통합 검증에는 위의 빌드와 초기 스키마 적용을 마친 로컬 Worker가 필요합니다. 별도 터미널에서 실행합니다.
-
-```sh
-npm start -- --port 5174
-```
-
-다른 터미널에서 검증을 실행합니다.
+통합 검증에는 위의 `.dev.vars`, 두 DB 마이그레이션, Auth Emulator 및 `npm run dev`가 필요합니다. `.wrangler/state` 아래에서 **현재 DB의 `.sqlite` 파일**을 찾습니다. `metadata.sqlite`를 선택하지 마세요.
 
 ```sh
-npm run test:integration
+rg --files --hidden --no-ignore .wrangler/state | rg '\.sqlite$'
 ```
 
-기본 대상은 http://127.0.0.1:5174 입니다. 검증은 합성 사용자 세 명과 테스트 일정을 로컬 DB에 만듭니다. loopback 주소에서만 실행할 수 있습니다. 개발 서버의 모의 로그인은 임의 인증 헤더를 차단하므로, 이 검증에는 5173 개발 서버 대신 위의 로컬 Worker를 사용합니다.
+경로를 대입해 실행합니다.
+
+```sh
+npm run test:integration -- http://127.0.0.1:5173 http://127.0.0.1:9099 --legacy-db .wrangler/state/v3/d1/실제-DB-경로/database.sqlite
+```
+
+검증은 loopback의 `demo-sai-calendar` 및 앱 내부 `.wrangler/state` DB만 허용합니다. 합성 계정·일정·이전 계정 fixture를 만들고 정리하므로 테스트용 로컬 DB에서 실행합니다. 운영 사이트나 실제 사용자 DB를 대상으로 실행하지 마세요. `npm start`의 운영 빌드에서는 unsigned Emulator 토큰을 사용할 수 없습니다.
+
+`scripts/smoke-calendar.mjs`는 이전 Sites 인증 방식의 참고 검증입니다. 현재 Firebase 전환 검증은 `scripts/smoke-firebase-auth.mjs`를 사용합니다.
 
 ## 인증과 배포
 
-운영 앱은 Sites의 ChatGPT 로그인과 Cloudflare D1 저장소를 사용합니다. `app/chatgpt-auth.ts`는 **Sites의 신뢰된 게이트웨이가 검증 후 주입한 인증 헤더**를 읽도록 설계되어 있습니다.
+### Firebase 운영 설정
 
-**다른 서버에 공개 배포하려면 인증을 해당 환경에 맞게 교체해야 합니다.** 원본 Worker를 직접 공개해 클라이언트가 보낸 인증 헤더를 그대로 신뢰하면 사용자 위조가 가능합니다. 로컬 통합 검증에서 합성 인증 헤더를 보내는 방식도 로컬 테스트에만 사용해야 합니다.
+운영 앱은 Firebase Authentication으로 사용자를 확인하고 Cloudflare D1에 일정·공유 관계를 저장하도록 구현했습니다. Firebase의 다음 **웹 앱 설정 네 값**을 호스팅 환경에 설정해야 합니다.
+
+| 환경 변수 | Firebase 웹 앱 설정 |
+| --- | --- |
+| `SAI_FIREBASE_API_KEY` | `apiKey` |
+| `SAI_FIREBASE_AUTH_DOMAIN` | `authDomain` |
+| `SAI_FIREBASE_PROJECT_ID` | `projectId` |
+| `SAI_FIREBASE_APP_ID` | `appId` |
+
+이 네 값은 브라우저 SDK에도 전달되는 공개 설정이며 서비스 계정 개인 키가 아닙니다. 사용자 비밀번호는 Firebase SDK가 처리하고 앱의 D1에는 저장하지 않습니다. 이 구현에는 Firebase Admin 서비스 계정 키가 필요하지 않습니다.
+
+배포 전 다음 설정을 완료합니다.
+
+1. Firebase Authentication에서 **이메일/비밀번호와 Google**을 활성화합니다. Google 제공자의 지원 이메일과 공개 앱 이름도 설정합니다.
+2. Authorized domains에 `sai-our-calendar.seonguk.chatgpt.site`를 추가합니다. 프로토콜·포트·경로는 넣지 않습니다.
+3. 비밀번호 정책을 **최소 8자, 적용 모드 Require**로 설정합니다. 프런트엔드 검증만으로 서버 정책을 대신할 수 없습니다.
+4. 이메일 템플릿의 custom action URL을 `https://sai-our-calendar.seonguk.chatgpt.site/auth/action`으로 설정하고 실제 확인·재설정 메일을 검증합니다.
+5. D1에 `0001` 인증 연결 마이그레이션을 적용하고 네 설정값과 앱을 같은 Firebase 프로젝트로 배포합니다.
+
+현재 Google 로그인은 클릭에서 바로 여는 팝업 방식입니다. 팝업 차단·웹뷰 오류에는 이메일 로그인이나 Safari·Chrome에서 열기를 안내합니다. 다른 도메인의 Firebase redirect 로그인으로 자동 전환하지 않습니다. 모바일 redirect를 추가하려면 Firebase의 동일 도메인 프록시 등 별도 설정이 필요합니다.
+
+서버는 ID 토큰의 Google 서명, 프로젝트·사용자·유효 시간·이메일 확인 상태를 검증하고 Firebase 계정 조회로 정지·삭제·토큰 폐기를 확인합니다. 세션 쿠키는 호스트 한정, HttpOnly, SameSite=Lax이며 HTTPS에서 Secure입니다. 쿠키 수명은 ID 토큰의 남은 시간 이내, 최대 1시간이고 클라이언트가 갱신합니다. API마다 D1 membership을 다시 확인합니다.
+
+### 기존 ChatGPT 계정의 일정 보존
+
+`auth_identities`는 Firebase 프로젝트·subject를 기존 앱 사용자 ID에 연결합니다. **이메일 문자열이 같다는 이유로 기존 일정을 자동 연결하지 않습니다.** 새 가입자는 새 ID를 받습니다.
+
+기존 일정 연결은 다음을 모두 확인하는 명시적 `/api/auth/link-legacy` 요청으로만 진행합니다.
+
+- 검증된 Firebase 로그인 및 최근 5분 이내 재인증
+- Sites 게이트웨이가 제공한 기존 계정의 신원
+- 새 계정에 이미 다른 캘린더가 없고, 기존 계정에 다른 Firebase identity가 연결되지 않았음
+
+사용자가 연결을 선택하면 identity mapping만 변경하여 기존 멤버·짝꿍·일정 ID를 보존합니다. 동시에 새 캘린더를 만들거나 초대에 가입하더라도 원자적 SQL 조건으로 충돌을 거부합니다. 기존 ChatGPT 로그인은 이 이전 과정의 소유 증명에만 사용하며 평소 로그인 수단이 아닙니다.
+
+`app/chatgpt-auth.ts`는 이전 소유 증명을 위해 남아 있습니다. Sites 밖에 배포할 때에는 클라이언트가 보낸 `oai-authenticated-*` 헤더를 신뢰하지 말고 이전 연결 경로를 비활성화하거나 해당 플랫폼의 검증된 소유 증명으로 교체해야 합니다. 토큰·비밀번호·초대 원문·서비스 계정 키를 소스, 로그, 공개 GitHub 저장소에 넣지 마세요.
 
 ## 현재 범위
 
@@ -99,12 +174,14 @@ npm run test:integration
 | 경로 | 역할 |
 | --- | --- |
 | `components/calendar/` | 캘린더 화면, 일정 폼, 초대와 설정 |
+| `components/auth/` | 가입·로그인·이메일 작업 화면과 세션 갱신 |
 | `lib/client/` | 날짜 표시, 예시 데이터, API 클라이언트 |
 | `lib/domain/calendar.ts` | 입력 검증과 반복 일정 전개 |
+| `lib/server/firebase-token.ts`, `app-auth.ts` | Firebase 토큰·계정 검증, 세션, 명시적 기존 계정 연결 |
 | `lib/server/calendar-service.ts` | 인증·권한 확인과 D1 요청 |
 | `app/api/` | API 경로 |
 | `db/schema.ts`, `drizzle/` | 스키마와 마이그레이션 |
-| `tests/`, `scripts/smoke-calendar.mjs` | 도메인·API 통합 검증 |
+| `tests/`, `scripts/smoke-firebase-auth.mjs` | 도메인·서명 토큰·로컬 Auth 통합 검증 |
 
 화면은 React·TypeScript로 작성했으며 Vinext·Vite·Cloudflare Workers를 사용합니다.
 

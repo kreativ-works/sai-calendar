@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import LandingPage from "@/components/landing/landing-page";
-import { getChatGPTUser } from "./chatgpt-auth";
+import { getAppUser } from "@/lib/server/app-auth";
 
 export const dynamic = "force-dynamic";
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -11,6 +11,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
   if (join) redirect(`/app?join=${encodeURIComponent(join)}`);
   if (params.demo === "1") redirect("/app?demo=1");
   if (params.setup === "1" || params.setup === "join") redirect(`/app?setup=${params.setup}`);
-  const user = await getChatGPTUser();
+  const user = await getAppUser().catch(() => null);
   return <LandingPage signedIn={!!user} />;
 }
