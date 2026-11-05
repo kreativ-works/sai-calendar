@@ -1,7 +1,7 @@
+/* eslint-disable @next/next/no-html-link-for-pages -- Auth entry and exit use full-document navigation to reset browser auth state. */
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import Link from "next/link";
 import { ArrowLeft, ArrowRight, CalendarDays, Check, CheckCircle2, Eye, EyeOff, Heart, LoaderCircle, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 import { applyActionCode, checkActionCode, confirmPasswordReset, createUserWithEmailAndPassword, GoogleAuthProvider, reload, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, updateProfile, verifyPasswordResetCode, type Auth, type User } from "firebase/auth";
 import { api, ApiError } from "@/lib/client/api";
@@ -241,7 +241,7 @@ export default function AuthScreen({ mode, returnTo: rawReturnTo, actionCode, ac
 
   return <main className="sai-auth">
     <a className="auth-skip" href="#auth-form">로그인 화면으로 건너뛰기</a>
-    <header className="auth-header"><Link className="auth-brand" href="/" aria-label="사이 홈"><span className="auth-brand-mark" aria-hidden="true"><i /><i /></span><span>sai<span>.</span></span></Link><a className="auth-demo-link" href="/app?demo=1">먼저 둘러보기<ArrowRight size={15} /></a></header>
+    <header className="auth-header"><a className="auth-brand" href="/" aria-label="사이 홈"><span className="auth-brand-mark" aria-hidden="true"><i /><i /></span><span>sai<span>.</span></span></a><a className="auth-demo-link" href="/app?demo=1">먼저 둘러보기<ArrowRight size={15} /></a></header>
     <div className="auth-layout"><AuthArtwork /><section id="auth-form" className="auth-card" aria-labelledby="auth-heading">
       <a className="auth-back" href={screenMode === "forgot" || screenMode === "action" ? authPageHref("/login", returnTo) : "/"}><ArrowLeft size={15} />{screenMode === "forgot" || screenMode === "action" ? "로그인으로" : "홈으로"}</a>
       <div className="auth-heading"><span className="auth-eyebrow">OUR TIME, TOGETHER</span>{panel !== "form" && panel !== "reset" ? <div className={`auth-status-icon ${panel === "action-error" ? "is-warning" : ""}`}>{panel === "verify" || panel === "forgot-sent" ? <Mail size={27} strokeWidth={1.5} /> : panel === "legacy" ? <CalendarDays size={27} strokeWidth={1.5} /> : <CheckCircle2 size={27} strokeWidth={1.5} />}</div> : null}<h1 id="auth-heading">{headline}</h1><p>{description}</p></div>
