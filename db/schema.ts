@@ -130,3 +130,25 @@ export const notificationDispatchState = sqliteTable("notification_dispatch_stat
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
+
+// Feedback belongs to its verified reporter, independently of couple membership.
+export const feedback = sqliteTable("feedback", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  category: text("category").notNull(),
+  page: text("page").notNull(),
+  reporterId: text("reporter_id").notNull(),
+  reporterName: text("reporter_name").notNull(),
+  reporterEmail: text("reporter_email").notNull(),
+  status: text("status").notNull().default("new"),
+  priority: text("priority").notNull().default("none"),
+  internalNote: text("internal_note").notNull().default(""),
+  revision: integer("revision").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  index("feedback_reporter_created").on(table.reporterId, table.createdAt),
+  index("feedback_created_id").on(table.createdAt, table.id),
+  index("feedback_status_created").on(table.status, table.createdAt, table.id),
+]);

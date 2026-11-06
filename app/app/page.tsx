@@ -2,6 +2,7 @@ import CalendarApp from "@/components/calendar/calendar-app";
 import SessionBridge from "@/components/auth/session-bridge";
 import SessionRecovery from "@/components/auth/session-recovery";
 import { getAppUser } from "@/lib/server/app-auth";
+import { isFeedbackAdmin } from "@/lib/server/feedback-service";
 import { validDate } from "@/lib/domain/calendar";
 
 export const dynamic = "force-dynamic";
@@ -28,5 +29,5 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
 async function CalendarAccess({ initialDemo, initialSetup, initialJoinCode, returnTo }: { initialDemo: boolean; initialSetup: Setup; initialJoinCode: string; returnTo: string }) {
   const user = await getAppUser().catch(() => null);
   if (!initialDemo && !user) return <SessionRecovery returnTo={returnTo} anonymousHref={`/login?returnTo=${encodeURIComponent(returnTo)}`} />;
-  return <>{user && !initialDemo ? <SessionBridge userId={user.userId} /> : null}<CalendarApp initialDemo={initialDemo} initialSetup={initialSetup} initialJoinCode={initialJoinCode} signedIn={!!user} /></>;
+  return <>{user && !initialDemo ? <SessionBridge userId={user.userId} /> : null}<CalendarApp initialDemo={initialDemo} initialSetup={initialSetup} initialJoinCode={initialJoinCode} signedIn={!!user} feedbackAdmin={isFeedbackAdmin(user)} /></>;
 }

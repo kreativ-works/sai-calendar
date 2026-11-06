@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { AlertCircle, ArrowUpRight, Bell, Check, ChevronRight, Copy, Heart, Link2, LoaderCircle, MailPlus, Users } from "lucide-react";
+import { AlertCircle, ArrowUpRight, Bell, Check, ChevronRight, Copy, Heart, Link2, LoaderCircle, MailPlus, MessageSquare, ClipboardList, Users } from "lucide-react";
 import type { CalendarState, HouseholdInput } from "@/lib/domain/calendar";
 import Dialog from "./dialog";
 
 export type InviteLink = { code: string; url: string; expiresAt: string };
-type SettingsProps = { state: CalendarState | null; initialTab: "create" | "join" | "settings"; initialCode?: string; connectionError: string; requiresSignIn: boolean; loading: boolean; demo: boolean; onRetry: () => void; onCreate: (input: HouseholdInput) => Promise<void>; onUpdate: (input: HouseholdInput) => Promise<void>; onJoin: (code: string) => Promise<void>; onInvite: () => Promise<InviteLink>; onRevoke: () => Promise<void>; onLive: () => void; onDemo: () => void; onNotifications: () => void; onClose: () => void; };
+type SettingsProps = { state: CalendarState | null; initialTab: "create" | "join" | "settings"; initialCode?: string; connectionError: string; requiresSignIn: boolean; loading: boolean; demo: boolean; onRetry: () => void; onCreate: (input: HouseholdInput) => Promise<void>; onUpdate: (input: HouseholdInput) => Promise<void>; onJoin: (code: string) => Promise<void>; onInvite: () => Promise<InviteLink>; onRevoke: () => Promise<void>; onLive: () => void; onDemo: () => void; onNotifications: () => void; onFeedback: () => void; feedbackAdmin?: boolean; onClose: () => void; };
 
-export default function CalendarSettings({ state, initialTab, initialCode = "", connectionError, requiresSignIn, loading, demo, onRetry, onCreate, onUpdate, onJoin, onInvite, onRevoke, onLive, onDemo, onNotifications, onClose }: SettingsProps) {
+export default function CalendarSettings({ state, initialTab, initialCode = "", connectionError, requiresSignIn, loading, demo, onRetry, onCreate, onUpdate, onJoin, onInvite, onRevoke, onLive, onDemo, onNotifications, onFeedback, feedbackAdmin = false, onClose }: SettingsProps) {
   const connected = !!state?.household;
   const [tab, setTab] = useState(connected ? "settings" : initialTab);
   const [input, setInput] = useState<HouseholdInput>(() => ({ name: state?.household?.name || "우리의 캘린더", aName: state?.members.find(member => member.slot === "a")?.name || "나", bName: state?.members.find(member => member.slot === "b")?.name || "짝꿍", anniversary: state?.household?.anniversary || "" }));
@@ -47,6 +47,7 @@ export default function CalendarSettings({ state, initialTab, initialCode = "", 
       {connected ? <section className="invite-section"><div className="section-heading"><MailPlus size={19} /><h3>짝꿍 초대</h3></div>{state.members.every(member => member.connected) ? <p className="field-hint">짝꿍이 연결됐어요. 이 공간은 두 사람만 함께 사용해요.</p> : <><p>링크를 받은 사람이 로그인하면,<br />같은 캘린더를 함께 사용할 수 있어요.</p><button type="button" className="secondary-button full-width" disabled={busy} onClick={() => void copyInvite()}>{copied ? <Check size={16} /> : <Copy size={16} />}{copied ? "초대 링크 복사 완료" : "초대 링크 만들고 복사"}</button>{link ? <><label className="field invite-url"><span>초대 링크 · 7일 동안 유효</span><input readOnly aria-label="생성된 초대 링크" value={link.url} onFocus={e => e.target.select()} /></label><button className="text-button danger-text" disabled={busy} onClick={() => void run(async () => { await onRevoke(); setLink(null); setCopied(false); setNotice("초대 링크를 해제했어요."); })}>이 초대 링크 해제</button></> : state.invite ? <p className="field-hint">진행 중인 초대가 있어요. 다시 만들면 기존 링크는 해제돼요.</p> : null}</>}</section> : null}
       {notice ? <p className="inline-notice success" role="status"><Check size={16} />{notice}</p> : null}
       {connected || demo ? <button type="button" className="settings-notification-entry" onClick={onNotifications}><Bell size={19} /><span>내 알림 설정<small>미리 알림 · 짝꿍 소식 · 조용한 시간</small></span><ChevronRight size={16} /></button> : null}
+      <button type="button" className="settings-notification-entry" onClick={onFeedback}><MessageSquare size={19} /><span>의견 보내기<small>불편한 점이나 바라는 기능을 알려주세요</small></span><ChevronRight size={16} /></button>{feedbackAdmin ? <a className="settings-notification-entry feedback-admin-link" href="/backlog"><ClipboardList size={19} /><span>피드백 백로그<small>접수한 의견과 진행 상태 관리</small></span><ChevronRight size={16} /></a> : null}
       {error ? <p className="form-error" role="alert"><AlertCircle size={16} />{error}</p> : null}
       {!error && connectionError && !connected && !requiresSignIn ? <p className="inline-notice"><AlertCircle size={16} />{connectionError}</p> : null}
       <div className="settings-bottom"><span><Users size={15} />두 사람만의 공유 공간</span>{connected && demo ? <button className="text-button" onClick={onLive}>내 캘린더로 이동 →</button> : <button className="text-button" onClick={() => { onDemo(); onClose(); }}>예시로 둘러보기 →</button>}</div>

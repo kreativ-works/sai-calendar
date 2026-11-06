@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { ArrowDownToLine, ArrowRight, CalendarDays, CalendarHeart, Check, ChevronLeft, ChevronRight, CircleCheck, Heart, Link2, List, LoaderCircle, MapPin, Menu, Plus, RefreshCw, Repeat2, Search, Settings2, Sparkles, Trash2, Users, X, Pencil, AlignLeft, AlertCircle } from "lucide-react";
+import { ArrowDownToLine, ArrowRight, CalendarDays, CalendarHeart, Check, ChevronLeft, ChevronRight, CircleCheck, Heart, Link2, List, LoaderCircle, MapPin, Menu, MessageSquare, ClipboardList, Plus, RefreshCw, Repeat2, Search, Settings2, Sparkles, Trash2, Users, X, Pencil, AlignLeft, AlertCircle } from "lucide-react";
 import { expandEvents, validDate, type CalendarEvent, type CalendarEventInput, type CalendarState, type HouseholdInput, type OwnerScope, type StoredEvent } from "@/lib/domain/calendar";
 import { api, ApiError } from "@/lib/client/api";
 import { addDays, CATEGORY_NAMES, dayDistance, dayNumber, dayOfWeek, downloadCalendar, eventRange, eventTime, fullDate, FULL_WEEKDAYS, monthCells, monthEnd, monthLabel, monthStart, occursOn, REPEAT_NAMES, shiftMonth, shortDate, sortEvents, todayInSeoul, WEEKDAYS, weekStart } from "@/lib/client/calendar-view";
@@ -12,6 +12,7 @@ import Dialog from "./dialog";
 import EventEditor, { OWNERS, type OwnerNames } from "./event-editor";
 import NotificationCenter, { type NotificationView } from "@/components/notifications/notification-center";
 import type { NotificationItem } from "@/lib/domain/notifications";
+import FeedbackDialog from "@/components/feedback/feedback-dialog";
 
 type View = "month" | "week" | "list";
 type EditorState = { date: string; event?: CalendarEvent } | null;
@@ -25,9 +26,9 @@ function EmptyState({ title, subtitle, onCreate }: { title: string; subtitle?: s
   return <div className="empty-state"><div className="empty-symbol"><CalendarHeart size={30} strokeWidth={1.2} /></div><h3>{title}</h3>{subtitle ? <p>{subtitle}</p> : null}{onCreate ? <button className="text-button" onClick={onCreate}><Plus size={15} />일정 만들기</button> : null}</div>;
 }
 
-type CalendarAppProps = { initialDemo?: boolean; initialSetup?: "create" | "join" | null; initialJoinCode?: string; signedIn?: boolean };
+type CalendarAppProps = { initialDemo?: boolean; initialSetup?: "create" | "join" | null; initialJoinCode?: string; signedIn?: boolean; feedbackAdmin?: boolean };
 
-export default function CalendarApp({ initialDemo = false, initialSetup = null, initialJoinCode = "", signedIn = false }: CalendarAppProps) {
+export default function CalendarApp({ initialDemo = false, initialSetup = null, initialJoinCode = "", signedIn = false, feedbackAdmin = false }: CalendarAppProps) {
   const [today, setToday] = useState(todayInSeoul);
   const [cursor, setCursor] = useState(() => monthStart(todayInSeoul()));
   const [selected, setSelected] = useState(todayInSeoul);
@@ -52,6 +53,7 @@ export default function CalendarApp({ initialDemo = false, initialSetup = null, 
   const [toast, setToast] = useState("");
   const [notificationView, setNotificationView] = useState<NotificationView>(null);
   const [notificationRefresh, setNotificationRefresh] = useState(0);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const notificationLinkHandled = useRef(false);
   const requestId = useRef(0);
   const initialized = useRef(false);
@@ -206,6 +208,9 @@ export default function CalendarApp({ initialDemo = false, initialSetup = null, 
       setEditor({ date });
     });
   }
+  function openFeedback() {
+    flushSync(() => { setSettings(null); setSidebarOpen(false); setNotificationView(null); setFeedbackOpen(true); });
+  }
   function showLive() { modeIntent.current = "live"; setMode("live"); setSettings(null); window.history.replaceState({}, "", "/app"); }
   function showDemo() { modeIntent.current = "demo"; setMode("demo"); window.history.replaceState({}, "", "/app?demo=1"); }
   async function saveEvent(input: CalendarEventInput, event?: CalendarEvent, clientRequestId?: string) {
@@ -247,7 +252,7 @@ export default function CalendarApp({ initialDemo = false, initialSetup = null, 
       <nav className="main-nav"><button className={view !== "list" ? "active" : ""} onClick={() => { setView("month"); setQuery(""); setSidebarOpen(false); }}><CalendarDays size={19} />우리 캘린더<span className="nav-active-dot" /></button><button className={view === "list" ? "active" : ""} onClick={() => { setView("list"); setSidebarOpen(false); }}><List size={19} />일정 모아보기</button></nav>
       <div className="mini-calendar"><div className="mini-heading"><strong>{monthLabel(cursor)}</strong><div><button className="tiny-icon-button" onClick={() => setCursor(shiftMonth(cursor, -1))} aria-label="작은 달력 이전 달"><ChevronLeft size={15} /></button><button className="tiny-icon-button" onClick={() => setCursor(shiftMonth(cursor, 1))} aria-label="작은 달력 다음 달"><ChevronRight size={15} /></button></div></div><div className="mini-grid">{WEEKDAYS.map(day => <span key={day} className="mini-weekday">{day}</span>)}{cells.map(date => <button key={date} className={`${date.slice(0, 7) !== cursor.slice(0, 7) ? "outside" : ""} ${date === selected ? "selected" : ""} ${date === today ? "today" : ""}`} aria-label={fullDate(date)} aria-current={date === today ? "date" : undefined} onClick={() => selectDate(date)}>{dayNumber(date)}</button>)}</div></div>
       <section className="calendar-filters"><div className="sidebar-section-label">우리의 캘린더<span>3</span></div>{OWNERS.map(owner => <button key={owner} className={`filter-row owner-${owner}`} aria-pressed={filters[owner]} onClick={() => setFilters(old => ({ ...old, [owner]: !old[owner] }))}><span className={`filter-check ${filters[owner] ? "checked" : ""}`}>{filters[owner] ? <Check size={12} strokeWidth={2.5} /> : null}</span><span>{names[owner]}</span>{owner === "both" ? <Heart size={14} /> : <span className="filter-type">{isDemo ? "예시" : snapshot?.viewerSlot === owner ? "나" : "짝꿍"}</span>}</button>)}</section>
-      <div className="sidebar-bottom"><div className="shared-space"><span className="space-icon"><Users size={19} /></span><div><strong>{isDemo ? "둘만의 작은 공간" : allConnected ? "두 사람이 연결됐어요" : "짝꿍과 함께 시작해요"}</strong><p>{isDemo ? "우리의 하루를 더 가깝게" : allConnected ? `${names.a} · ${names.b}` : "초대 링크를 보내보세요"}</p></div></div><button className="sidebar-settings" onClick={openSettings}><Settings2 size={18} />캘린더 설정<ChevronRight size={15} /></button><p className="sidebar-footnote">MADE FOR TWO, BY SAI.</p></div>
+      <div className="sidebar-bottom"><div className="shared-space"><span className="space-icon"><Users size={19} /></span><div><strong>{isDemo ? "둘만의 작은 공간" : allConnected ? "두 사람이 연결됐어요" : "짝꿍과 함께 시작해요"}</strong><p>{isDemo ? "우리의 하루를 더 가깝게" : allConnected ? `${names.a} · ${names.b}` : "초대 링크를 보내보세요"}</p></div></div><button className="sidebar-settings" onClick={openSettings}><Settings2 size={18} />캘린더 설정<ChevronRight size={15} /></button><button className="sidebar-settings" onClick={openFeedback}><MessageSquare size={18} />의견 보내기<ChevronRight size={15} /></button>{feedbackAdmin && !isDemo ? <a className="sidebar-settings feedback-admin-link" href="/backlog"><ClipboardList size={18} />피드백 백로그<ChevronRight size={15} /></a> : null}<p className="sidebar-footnote">MADE FOR TWO, BY SAI.</p></div>
     </aside>
 
     <div className="app-workspace">
@@ -278,7 +283,8 @@ export default function CalendarApp({ initialDemo = false, initialSetup = null, 
     </nav>
     {editor ? <EventEditor key={editor.event?.occurrenceId || `new-${editor.date}`} date={editor.date} event={editor.event} events={events} names={names} demo={isDemo} onSave={saveEvent} onClose={() => setEditor(null)} /> : null}
     {detail ? <EventDetail event={detail} names={names} demo={isDemo} onClose={() => setDetail(null)} onEdit={() => { setEditor({ date: detail.startDate, event: detail }); setDetail(null); }} onDelete={() => deleteEvent(detail)} /> : null}
-    {settings ? <CalendarSettings key={`${settings}-${snapshot?.household?.id || "new"}`} state={snapshot} initialTab={settings} initialCode={joinCode} connectionError={connectionError} requiresSignIn={requiresSignIn} loading={loading && !snapshot} demo={isDemo} onRetry={() => void refresh().catch(() => {})} onCreate={createHousehold} onUpdate={updateHousehold} onJoin={joinHousehold} onInvite={() => api<InviteLink>("/api/invites", { method: "POST", body: "{}" })} onRevoke={async () => { await api("/api/invites", { method: "DELETE", body: "{}" }); await refresh(true); }} onLive={showLive} onDemo={showDemo} onNotifications={() => { setSettings(null); setNotificationView("settings"); }} onClose={() => setSettings(null)} /> : null}
+    {settings ? <CalendarSettings key={`${settings}-${snapshot?.household?.id || "new"}`} state={snapshot} initialTab={settings} initialCode={joinCode} connectionError={connectionError} requiresSignIn={requiresSignIn} loading={loading && !snapshot} demo={isDemo} onRetry={() => void refresh().catch(() => {})} onCreate={createHousehold} onUpdate={updateHousehold} onJoin={joinHousehold} onInvite={() => api<InviteLink>("/api/invites", { method: "POST", body: "{}" })} onRevoke={async () => { await api("/api/invites", { method: "DELETE", body: "{}" }); await refresh(true); }} onLive={showLive} onDemo={showDemo} onNotifications={() => { setSettings(null); setNotificationView("settings"); }} onFeedback={openFeedback} feedbackAdmin={feedbackAdmin && !isDemo} onClose={() => setSettings(null)} /> : null}
+    {feedbackOpen ? <FeedbackDialog demo={isDemo} reporterEmail={snapshot?.user.email} onClose={() => setFeedbackOpen(false)} /> : null}
     <div className={`toast ${toast ? "visible" : ""}`} role="status" aria-live="polite">{toast ? <><CircleCheck size={17} />{toast}</> : null}</div>
     <span className="sr-only" role="status">{loading && !isDemo ? "일정을 불러오는 중" : ""}</span>
   </div>;
