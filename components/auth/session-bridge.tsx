@@ -1,57 +1,65 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { onIdTokenChanged } from "firebase/auth";
-import { ApiError } from "@/lib/client/api";
-import { authPageHref, clearServerSession, getFirebaseAuth, syncServerSession } from "@/lib/client/firebase-auth";
+import { authPageHref, getFirebaseAuth, isPermanentAuthError, logout, restoreAppSession, syncServerSession } from "@/lib/client/firebase-auth";
+import { bindSessionContext } from "@/lib/client/session-context";
 
-/** Mount for Firebase sessions only. Existing legacy sessions use an explicit migration flow. */
-export default function SessionBridge({ enabled = true }: { enabled?: boolean }) {
+export default function SessionBridge({ enabled = true, userId }: { enabled?: boolean; userId?: string }) {
+  useLayoutEffect(() => { if (enabled && userId) bindSessionContext(userId); }, [enabled, userId]);
   useEffect(() => {
     if (!enabled) return;
     let active = true;
     let unsubscribe: (() => void) | undefined;
     let syncing = false;
-    let redirecting = false;
-    const login = async () => {
-      if (!active || redirecting) return;
-      redirecting = true;
-      try { await clearServerSession(); } catch { /* The protected server will reject an expired session. */ }
-      if (active) window.location.replace(authPageHref("/login", `${window.location.pathname}${window.location.search}`));
+    let leaving = false;
+    let previousUid: string | null | undefined;
+    const leave = (reload = false) => {
+      if (!active || leaving) return;
+      leaving = true;
+      if (reload) window.location.reload();
+      else window.location.replace(authPageHref("/login", `${window.location.pathname}${window.location.search}`));
     };
-    const refresh = async () => {
-      if (!active || syncing || redirecting) return;
+    const reconcile = async () => {
+      if (!active || syncing || leaving) return;
       syncing = true;
       try {
-        const auth = await getFirebaseAuth();
-        if (!auth) return;
-        await auth.authStateReady();
-        const user = auth.currentUser;
-        if (!user || !user.emailVerified) { await login(); return; }
-        await syncServerSession(user);
-      } catch (error) {
-        // Transient network failures keep the current view usable and retry on focus.
-        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) await login();
-      } finally { syncing = false; }
+        const result = await restoreAppSession();
+        if (!active) return;
+        if (result.status !== "authenticated") leave();
+        else if (userId && result.session.user?.id !== userId) leave(true);
+      } catch { /* Offline and temporary provider failures keep the current view and retry later. */ }
+      finally { syncing = false; }
     };
     void getFirebaseAuth().then(auth => {
       if (!active || !auth) return;
-      unsubscribe = onIdTokenChanged(auth, () => { void refresh(); });
-    }).catch(() => { /* Retry when the app regains focus. */ });
-    const onFocus = () => { void refresh(); };
-    const onVisibility = () => { if (document.visibilityState === "visible") void refresh(); };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibility);
-    const refreshTimer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refresh();
-    }, 4 * 60 * 1000);
+      unsubscribe = onIdTokenChanged(auth, user => {
+        if (!active || leaving) return;
+        const wasSignedIn = previousUid !== undefined && previousUid !== null;
+        previousUid = user?.uid || null;
+        if (!user) {
+          if (wasSignedIn) void logout().catch(() => {}).finally(() => leave());
+          else void reconcile(); // A valid server cookie survives an absent SDK store, including PWA startup.
+          return;
+        }
+        if (!user.emailVerified) { void reconcile(); return; }
+        void syncServerSession(user).then(session => { if (userId && session.user?.id !== userId) leave(true); }).catch(error => {
+          if (isPermanentAuthError(error)) void logout().catch(() => {}).finally(() => leave());
+        });
+      });
+      void reconcile();
+    }).catch(() => { void reconcile(); });
+    const update = () => { if (!document.hidden) void reconcile(); };
+    const changed = () => leave(true);
+    window.addEventListener("focus", update); window.addEventListener("online", update);
+    window.addEventListener("sai:session-changed", changed);
+    document.addEventListener("visibilitychange", update);
+    const timer = window.setInterval(update, 4 * 60 * 1000);
     return () => {
-      active = false;
-      unsubscribe?.();
-      window.clearInterval(refreshTimer);
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
+      active = false; unsubscribe?.(); window.clearInterval(timer);
+      window.removeEventListener("focus", update); window.removeEventListener("online", update);
+      window.removeEventListener("sai:session-changed", changed); document.removeEventListener("visibilitychange", update);
     };
-  }, [enabled]);
+  }, [enabled, userId]);
   return null;
 }

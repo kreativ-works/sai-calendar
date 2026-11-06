@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, CalendarDays, Check, CheckCircle2, Eye, EyeOff, Heart, LoaderCircle, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 import { applyActionCode, checkActionCode, confirmPasswordReset, createUserWithEmailAndPassword, GoogleAuthProvider, reload, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, updateProfile, verifyPasswordResetCode, type Auth, type User } from "firebase/auth";
 import { api, ApiError } from "@/lib/client/api";
-import { authErrorMessage, authPageHref, consumeGoogleRedirectResult, getAuthConfiguration, getFirebaseAuth, logout, normalizeReturnTo, syncServerSession, usesSameOriginGoogleRedirect, type AuthConfiguration } from "@/lib/client/firebase-auth";
+import { authErrorMessage, authPageHref, beginSignIn, consumeGoogleRedirectResult, getAuthConfiguration, getFirebaseAuth, logout, normalizeReturnTo, restoreAppSession, syncServerSession, usesSameOriginGoogleRedirect, type AuthConfiguration } from "@/lib/client/firebase-auth";
 
 export type AuthScreenProps = {
   mode: "login" | "signup" | "forgot" | "action";
@@ -112,9 +112,22 @@ export default function AuthScreen({ mode, returnTo: rawReturnTo, actionCode, ac
             // Sending a password reset remains an explicit user action.
             await logout();
           } else throw new Error("이 링크를 처리할 수 없어요. 로그인 화면에서 다시 시작해주세요.");
-        } else if (mode !== "forgot" && (redirectCredential?.user || instance.currentUser)) {
+        } else if (redirectCredential?.user) {
+          // A completed Google redirect is an explicit sign-in, even if an older
+          // server cookie is still present for this browser.
+          await finishSignIn(redirectCredential.user, true);
+        } else if (mode === "login" || mode === "signup") {
+          const restored = await restoreAppSession();
+          if (cancelled) return;
+          if (restored.status === "authenticated") {
+            if (restored.session.legacyAvailable) setPanel("legacy");
+            else window.location.replace(returnTo);
+            return;
+          }
           // Reload after opening an email verification link in a different tab.
-          const user = redirectCredential?.user || instance.currentUser;
+          // Anonymous restoration also covers an explicit logout: do not revive
+          // a stale Firebase user merely because it is still being signed out.
+          const user = restored.status === "unverified" ? instance.currentUser : null;
           if (!user) return;
           await reload(user);
           if (!cancelled) await finishSignIn(user, true);
@@ -180,11 +193,13 @@ export default function AuthScreen({ mode, returnTo: rawReturnTo, actionCode, ac
         catch (cause) { if (!(typeof cause === "object" && cause && "code" in cause && cause.code === "auth/user-not-found")) throw cause; }
         setPanel("forgot-sent");
       } else if (isSignup) {
+        beginSignIn();
         const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
         setCurrentUser(credential.user); setPanel("verify"); setPassword(""); setConfirm("");
         await updateProfile(credential.user, { displayName: name.trim() });
         await sendVerification(credential.user);
       } else {
+        beginSignIn();
         const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
         setPassword("");
         await finishSignIn(credential.user);
@@ -194,6 +209,8 @@ export default function AuthScreen({ mode, returnTo: rawReturnTo, actionCode, ac
 
   function googleSignIn() {
     if (!auth || disabled || !configuration?.providers.google) return;
+    try { beginSignIn(); }
+    catch (cause) { setError(authErrorMessage(cause)); return; }
     setBusy(true); setGooglePending(true); setGoogleSlow(false); setError(""); setNotice("");
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });

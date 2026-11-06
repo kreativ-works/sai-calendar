@@ -46,7 +46,16 @@ async function readSession(): Promise<AppSession | null> {
   }
 }
 
-export async function getAppUser(): Promise<AppUser | null> { return (await readSession())?.user ?? null; }
+export async function getAppUser(): Promise<AppUser | null> {
+  const user = (await readSession())?.user ?? null;
+  const expectedUser = (await headers()).get("X-Sai-Expected-User");
+  // A restored cookie may belong to a different account after another tab signs
+  // in. Never apply a request authored in the previous account's calendar there.
+  if (user && expectedUser !== null && (expectedUser.length > 128 || expectedUser !== user.userId)) {
+    throw new CalendarError(409, "SESSION_CHANGED", "다른 계정으로 전환됐어요. 새로고침한 후 다시 시도해 주세요.");
+  }
+  return user;
+}
 
 export async function hasLegacyCalendar(user: AppUser): Promise<boolean> {
   const legacy = await getChatGPTUser();

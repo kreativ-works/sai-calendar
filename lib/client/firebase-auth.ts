@@ -1,9 +1,11 @@
 "use client";
 
 import { getApp, getApps, initializeApp } from "firebase/app";
-import { connectAuthEmulator, getAuth, getRedirectResult, signOut, type Auth, type User, type UserCredential } from "firebase/auth";
+import { browserLocalPersistence, browserPopupRedirectResolver, connectAuthEmulator, getAuth, getRedirectResult, indexedDBLocalPersistence, initializeAuth, signOut, type Auth, type User, type UserCredential } from "firebase/auth";
 import { disconnectDevicePushBeforeLogout } from "./push-logout";
 import { api } from "./api";
+import { createSessionCoordinator, SessionCancelledError, type RestorationResult } from "./session-coordinator";
+import { announceSessionChange, bindSessionContext, captureSessionContext, invalidateSessionContext } from "./session-context";
 
 export type AuthConfiguration = {
   configured: boolean;
@@ -50,7 +52,9 @@ export function getFirebaseAuth(): Promise<Auth | null> {
     authPromise = getAuthConfiguration().then(config => {
       if (!config.configured || !config.firebase || typeof window === "undefined") return null;
       const app = getApps().some(item => item.name === "sai-auth") ? getApp("sai-auth") : initializeApp(config.firebase, "sai-auth");
-      const auth = getAuth(app);
+      let auth: Auth;
+      try { auth = initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence], popupRedirectResolver: browserPopupRedirectResolver }); }
+      catch (error) { if (!(typeof error === "object" && error && "code" in error && error.code === "auth/already-initialized")) throw error; auth = getAuth(app); }
       auth.languageCode = "ko";
       // The server only supplies emulatorUrl in explicitly enabled local development.
       if (config.emulatorUrl && !emulatorConnected && ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)) {
@@ -86,26 +90,78 @@ export function consumeGoogleRedirectResult(auth: Auth): Promise<UserCredential 
   return result;
 }
 
-export async function syncServerSession(user: User, forceRefresh = false): Promise<SessionResult> {
-  const idToken = await user.getIdToken(forceRefresh);
-  return api<SessionResult>("/api/auth/session", { method: "POST", body: JSON.stringify({ idToken }) });
+function errorCode(error: unknown): string { return typeof error === "object" && error && "code" in error ? String(error.code) : ""; }
+export function isPermanentAuthError(error: unknown): boolean {
+  return ["INVALID_TOKEN", "auth/user-token-expired", "auth/invalid-user-token", "auth/user-disabled", "auth/user-not-found"].includes(errorCode(error));
 }
 
-export async function clearServerSession(): Promise<void> {
-  await disconnectDevicePushBeforeLogout();
-  await api("/api/auth/session", { method: "DELETE", body: "{}" });
+const LOGOUT_KEY = "sai:auth:logout:v1";
+let intentListenerInstalled = false;
+let logoutIntent = false;
+const coordinator = createSessionCoordinator<User, SessionResult>({
+  readServer: () => api<SessionResult>("/api/auth/session"),
+  readIdentity: async () => { const auth = await getFirebaseAuth(); if (!auth) return null; await auth.authStateReady(); return auth.currentUser; },
+  token: async (user, forceRefresh) => {
+    const auth = await getFirebaseAuth();
+    await auth?.authStateReady();
+    if (auth?.currentUser?.uid !== user.uid) throw new SessionCancelledError();
+    const token = await user.getIdToken(forceRefresh);
+    if (auth?.currentUser?.uid !== user.uid) throw new SessionCancelledError();
+    return token;
+  },
+  writeServer: async idToken => {
+    const session = await api<SessionResult>("/api/auth/session", { method: "POST", body: JSON.stringify({ idToken }) });
+    const confirmed = await api<SessionResult>("/api/auth/session");
+    if (!session.user || confirmed.user?.id !== session.user.id) throw Object.assign(new Error("브라우저에서 로그인 상태를 저장하지 못했어요. 쿠키 허용 상태를 확인하고 다시 시도해주세요."), { code: "SESSION_NOT_PERSISTED" });
+    return confirmed;
+  },
+  clearServer: async () => { await api("/api/auth/session", { method: "DELETE", body: "{}" }); },
+  signOut: async () => { const auth = await getFirebaseAuth(); if (auth) await signOut(auth); },
+  disconnect: disconnectDevicePushBeforeLogout,
+  isPermanent: isPermanentAuthError,
+  isUnverified: error => errorCode(error) === "EMAIL_UNVERIFIED",
+  onAuthenticated: session => { const current = captureSessionContext(); if (current.userId && session.user?.id && current.userId !== session.user.id) announceSessionChange(); else bindSessionContext(session.user?.id || null); },
+  onLogout: () => {
+    invalidateSessionContext();
+    const broadcast = !logoutIntent;
+    logoutIntent = true;
+    if (broadcast) try { localStorage.setItem(LOGOUT_KEY, `${Date.now()}:${crypto.randomUUID()}`); } catch { /* Firebase sign-out remains authoritative when storage is unavailable. */ }
+  },
+});
+
+function installIntentListener() {
+  if (intentListenerInstalled || typeof window === "undefined") return;
+  intentListenerInstalled = true;
+  try { logoutIntent = !!localStorage.getItem(LOGOUT_KEY); } catch { /* Storage may be unavailable in a private browser. */ }
+  window.addEventListener("storage", event => {
+    if (event.key !== LOGOUT_KEY) return;
+    logoutIntent = !!event.newValue;
+    if (logoutIntent) void coordinator.logout().catch(() => {});
+  });
 }
 
-export async function logout(): Promise<void> {
-  await disconnectDevicePushBeforeLogout();
-  // Clear both sessions even if one service is temporarily unavailable.
-  const results = await Promise.allSettled([
-    getFirebaseAuth().then(auth => auth ? signOut(auth) : undefined),
-    clearServerSession(),
-  ]);
-  const failed = results.find(result => result.status === "rejected");
-  if (failed?.status === "rejected") throw failed.reason;
+export function beginSignIn(): void {
+  installIntentListener();
+  coordinator.beginSignIn();
+  invalidateSessionContext();
+  logoutIntent = false;
+  try { localStorage.removeItem(LOGOUT_KEY); } catch { /* Sign-in is still allowed when storage is unavailable. */ }
 }
+
+export function syncServerSession(user: User, forceRefresh = false): Promise<SessionResult> {
+  installIntentListener();
+  if (logoutIntent) return Promise.reject(Object.assign(new Error("로그아웃한 계정이에요. 다시 로그인해주세요."), { code: "SESSION_CANCELLED" }));
+  return coordinator.sync(user, forceRefresh);
+}
+
+export function restoreAppSession(): Promise<RestorationResult<SessionResult>> {
+  installIntentListener();
+  if (logoutIntent) return Promise.resolve({ status: "anonymous" });
+  return coordinator.restore();
+}
+
+export function clearServerSession(): Promise<void> { return api("/api/auth/session", { method: "DELETE", body: "{}" }).then(() => undefined); }
+export function logout(): Promise<void> { installIntentListener(); return coordinator.logout(); }
 
 export function authErrorMessage(error: unknown): string {
   const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";

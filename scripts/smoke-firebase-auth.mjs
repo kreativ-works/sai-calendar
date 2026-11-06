@@ -187,8 +187,31 @@ try {
   assert.ok((await state(a)).events.some((item) => item.id === eventId));
   passed("Firebase cookie authorizes persisted event creation and reload");
 
+  const recovery = await fetch(new URL("/app?setup=join", base), { redirect: "error", signal: AbortSignal.timeout(15_000) });
+  assert.equal(recovery.status, 200, "An expired browser session must get a recovery shell before an auth form.");
+  const recoveryHtml = await recovery.text();
+  assert.ok(recoveryHtml.includes("우리의 시간을 불러오고 있어요"));
+  assert.ok(!recoveryHtml.includes(event.title), "The recovery shell must not contain private calendar data.");
+  assert.equal((await appRequest(statePath)).status, 401);
+  passed("anonymous calendar navigation gets only a recovery shell and private APIs still reject it");
+
+  const rememberedHome = await fetch(new URL("/", base), { headers: { Cookie: a.cookie }, redirect: "manual", signal: AbortSignal.timeout(15_000) });
+  assert.equal(rememberedHome.status, 307);
+  assert.equal(new URL(rememberedHome.headers.get("location"), base).pathname, "/app");
+  passed("a remembered valid session opens the calendar directly from home");
+
   const b = await verifyEmail(await emailUser("b"));
   await establish(b);
+  assert.equal((await appRequest(statePath, a, "GET", undefined, { headers: { "X-Sai-Expected-User": a.appId } })).status, 200);
+  const switchedRead = await appRequest(statePath, b, "GET", undefined, { headers: { "X-Sai-Expected-User": a.appId } });
+  assert.equal(switchedRead.status, 409);
+  assert.equal(switchedRead.value.error.code, "SESSION_CHANGED");
+  const switchedEventId = randomUUID();
+  const switchedWrite = await appRequest("/api/events", b, "POST", { ...event, clientRequestId: switchedEventId }, { headers: { "X-Sai-Expected-User": a.appId } });
+  assert.equal(switchedWrite.status, 409);
+  assert.equal(switchedWrite.value.error.code, "SESSION_CHANGED");
+  assert.equal(db.prepare("SELECT id FROM events WHERE id = ?").get(switchedEventId), undefined);
+  passed("account-bound requests reject reads and writes after another tab switches the cookie user");
   const invitation = await appRequest("/api/invites", a, "POST", {});
   assert.equal(invitation.status, 200, describe(invitation));
   assert.equal((await appRequest("/api/invites/join", b, "POST", { code: invitation.value.code })).status, 200);
