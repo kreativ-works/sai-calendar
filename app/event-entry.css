@@ -11,11 +11,12 @@
 .event-editor .event-entry-footer .primary-button { flex: 1; min-height: 46px; font-size: 13px; }
 .event-editor .event-entry-footer .secondary-button { min-width: 82px; min-height: 46px; font-size: 13px; }
 .event-quick-date { margin-top: 19px; padding: 16px; border: 1px solid #e9e2f0; border-radius: 12px; background: #fcfaff; }
-.event-date-topline { display: flex; align-items: flex-end; gap: 12px; }
-.event-date-topline > .field { flex: 1; min-width: 0; }
+.event-date-topline { min-width: 0; }
+.event-date-topline > .field { min-width: 0; }
 .event-date-topline > .field > span { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #7a6588; }
+.event-time-zone { margin-left: auto; font-size: 10px; font-weight: 400; color: #7c6689; }
 .event-editor .event-date-topline input { min-height: 46px; min-width: 0; font-size: 16px; padding: 10px 9px; color: #6e5480; background: #fff; border-color: #ded2e8; letter-spacing: -.025em; }
-.event-time-choice { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 46px; padding: 10px; border: 1px solid #ded3e9; border-radius: 8px; font-size: 12px; color: #795b91; background: #f5effb; white-space: nowrap; flex-shrink: 0; }
+.event-time-choice { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 9px 12px; border: 1px solid #ded3e9; border-radius: 8px; font-size: 12px; color: #795b91; background: #f5effb; white-space: nowrap; flex-shrink: 0; }
 .event-time-choice:hover { background: #eee5f7; }
 .event-time-choice.has-time { background: #fff; color: #876998; }
 .event-date-caption { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; color: #7c6689; margin-top: 12px; }
@@ -23,7 +24,11 @@
 .event-all-day-badge { background: #ede7f6; color: #78549b; }
 .event-timed-badge { background: #e9f3ed; color: #4d7a61; }
 .event-editor .event-quick-date .time-input-row { margin-top: 15px; }
+.event-editor .time-input-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.event-editor input[type="date"], .event-editor input[type="time"] { display: block; width: 100%; max-width: 100%; min-width: 0; -webkit-appearance: none; appearance: none; }
+.event-editor input[type="date"]::-webkit-date-and-time-value, .event-editor input[type="time"]::-webkit-date-and-time-value { min-width: 0; text-align: left; }
 .event-editor .event-quick-date .time-input-row input { min-height: 46px; font-size: 16px; padding: 10px 9px; background: #fff; }
+.event-end-day { color: #6e5480; font-size: 11px; line-height: 1.5; }
 .event-extra-options { margin-top: 14px; border-top: 1px solid #eee7f4; }
 .event-extra-options > summary { display: flex; align-items: center; gap: 8px; list-style: none; min-height: 50px; padding: 12px 0; font-size: 12px; color: #836a94; cursor: pointer; }
 .event-extra-options > summary::-webkit-details-marker { display: none; }
@@ -79,8 +84,7 @@
   .event-editor .owner-picker { gap: 7px; }
   .event-editor .owner-option { min-height: 44px; padding: 8px 6px; font-size: 12px; }
   .event-quick-date { margin-top: 15px; padding: 13px; }
-  .event-date-topline { gap: 8px; }
-  .event-time-choice { font-size: 11px; padding: 9px 8px; gap: 4px; }
+  .event-time-choice { font-size: 12px; padding: 9px 11px; gap: 5px; }
   .event-date-caption { margin-top: 10px; }
   .event-editor .event-entry-footer { padding: 12px 20px max(12px, env(safe-area-inset-bottom)); min-height: 70px; gap: 10px; }
   .event-editor .event-entry-footer .primary-button, .event-editor .event-entry-footer .secondary-button { min-height: 46px; }
@@ -98,8 +102,6 @@
   .event-editor .event-entry-footer { padding-left: 15px; padding-right: 15px; }
   .event-editor .title-field input { font-size: 21px; }
   .event-quick-date { padding: 11px; }
-  .event-date-topline { gap: 6px; }
-  .event-time-choice { padding-left: 7px; padding-right: 7px; font-size: 10px; }
-  .event-time-choice svg { width: 14px; height: 14px; }
+  .event-editor .time-input-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { .event-extra-options > summary > svg:last-child { transition: none; } }
