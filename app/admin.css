@@ -1,0 +1,82 @@
+.admin-shell { min-height: 100dvh; background: #faf9f6; color: #5e476d; }
+.admin-shell a { -webkit-tap-highlight-color: transparent; }
+.admin-header { background: #fffefd; border-bottom: 1px solid #e8dfed; }
+.admin-header-inner { width: min(1216px, calc(100% - 96px)); margin: 0 auto; }
+.admin-masthead { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 88px; }
+.admin-brand { display: inline-flex; align-items: center; gap: 15px; min-height: 52px; color: #75518f; text-decoration: none; flex-shrink: 0; }
+.admin-brand-mark { font-size: 36px; font-weight: 650; letter-spacing: -.075em; line-height: 1.2; color: #8965ad; padding: 0 3px 4px 0; }
+.admin-brand-mark > span { color: #c9afd9; }
+.admin-brand-copy { display: flex; flex-direction: column; gap: 4px; padding-left: 15px; border-left: 1px solid #e5dbea; }
+.admin-brand-copy > strong { font-size: 13px; font-weight: 600; letter-spacing: -.025em; color: #705582; }
+.admin-brand-copy > small { font-size: 8px; letter-spacing: .115em; color: #9a85a7; }
+.admin-header-actions { display: flex; align-items: center; gap: 17px; }
+.admin-header-actions > a { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 7px 0; color: #80648f; font-size: 12px; text-decoration: none; white-space: nowrap; }
+.admin-header-actions > a:hover { color: #65417f; }
+.admin-header-actions > .admin-calendar-link { padding: 8px 12px; border: 1px solid #e8dfee; border-radius: 9px; background: #fcfaff; }
+.admin-header-actions > .admin-calendar-link:hover { background: #f4edf9; border-color: #d8c7e4; }
+.admin-header-actions > .admin-logout-link { color: #8d789b; }
+.admin-workspace-bar { display: flex; align-items: center; justify-content: space-between; gap: 25px; min-height: 76px; border-top: 1px solid #f0e9f4; }
+.admin-navigation { display: flex; align-items: center; min-width: 0; }
+.admin-navigation > a { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 44px; padding: 10px 14px; border: 1px solid transparent; border-radius: 9px; color: #816195; font-size: 12px; text-decoration: none; white-space: nowrap; }
+.admin-navigation > a[aria-current="page"] { border-color: #dfd0eb; background: #f0e9f7; color: #795692; font-weight: 600; }
+.admin-navigation > a > svg { color: #9a77b2; flex-shrink: 0; }
+.admin-identity { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: min(380px, 50%); padding: 10px 0; }
+.admin-avatar { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex-shrink: 0; background: #efe8f7; border: 1px solid #e5d9ee; border-radius: 12px; color: #9a7aaf; font-size: 13px; font-weight: 550; }
+.admin-identity-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.admin-identity-copy > div { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.admin-identity-copy strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #785d8b; font-size: 11px; font-weight: 600; line-height: 1.65; }
+.admin-role { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; color: #92789f; font-size: 9px; line-height: 1.6; padding: 1px 5px; border: 1px solid #e8deef; background: #faf7fd; border-radius: 5px; }
+.admin-identity-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8e799b; font-size: 10px; line-height: 1.8; }
+.admin-content { min-width: 0; }
+.admin-content:focus { outline: none; }
+.admin-shell .feedback-backlog { min-height: calc(100dvh - 165px); padding-top: 0; }
+.admin-shell .backlog-hero, .admin-shell .backlog-workspace { width: min(1216px, 100%); }
+.admin-shell .backlog-hero { margin-top: 33px; }
+.admin-shell a:focus-visible { outline: 3px solid #a88bc1; outline-offset: 3px; }
+.admin-skip-link { position: fixed; top: -100px; left: 20px; z-index: 210; display: inline-flex; align-items: center; min-height: 44px; padding: 10px 16px; border-radius: 9px; background: #76518f; color: #fff; font-size: 13px; text-decoration: none; box-shadow: 0 4px 20px #62427520; }
+.admin-skip-link:focus { top: 12px; }
+
+@media (max-width: 900px) {
+  .admin-header-inner { width: calc(100% - 50px); }
+  .admin-masthead { gap: 18px; }
+  .admin-header-actions { gap: 13px; }
+}
+@media (max-width: 640px) {
+  .admin-header-inner { width: calc(100% - 34px); }
+  .admin-masthead { min-height: 78px; gap: 12px; }
+  .admin-brand { gap: 10px; min-height: 48px; }
+  .admin-brand-mark { font-size: 32px; padding-bottom: 4px; }
+  .admin-brand-copy { gap: 4px; padding-left: 10px; }
+  .admin-brand-copy > strong { font-size: 11px; }
+  .admin-brand-copy > small { font-size: 6px; letter-spacing: .085em; }
+  .admin-header-actions { gap: 10px; flex-shrink: 0; }
+  .admin-header-actions > a { gap: 5px; min-height: 44px; font-size: 10px; }
+  .admin-header-actions > .admin-calendar-link { padding: 7px 9px; border-radius: 8px; }
+  .admin-header-actions > .admin-calendar-link > svg:first-child { display: none; }
+  .admin-header-actions > .admin-calendar-link > svg:last-child { width: 12px; height: 12px; }
+  .admin-header-actions > .admin-logout-link { gap: 4px; }
+  .admin-header-actions > .admin-logout-link > svg { width: 13px; height: 13px; }
+  .admin-workspace-bar { flex-direction: column-reverse; align-items: stretch; gap: 0; padding: 11px 0 13px; min-height: 0; }
+  .admin-identity { max-width: none; gap: 9px; padding: 0 1px 12px; }
+  .admin-avatar { width: 33px; height: 33px; font-size: 12px; border-radius: 11px; }
+  .admin-identity-copy { gap: 2px; }
+  .admin-identity-copy strong { font-size: 11px; line-height: 1.5; }
+  .admin-identity-email { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; font-size: 10px; line-height: 1.6; }
+  .admin-role { font-size: 8px; }
+  .admin-navigation { display: block; }
+  .admin-navigation > a { display: flex; width: 100%; min-height: 44px; justify-content: flex-start; padding: 9px 13px; font-size: 12px; }
+  .admin-shell .feedback-backlog { min-height: 60dvh; }
+  .admin-shell .backlog-hero { margin-top: 26px; }
+  .admin-skip-link { left: 17px; }
+}
+@media (max-width: 359px) {
+  .admin-header-inner { width: calc(100% - 26px); }
+  .admin-masthead { gap: 8px; }
+  .admin-brand { gap: 8px; }
+  .admin-brand-mark { font-size: 30px; }
+  .admin-brand-copy { padding-left: 8px; }
+  .admin-brand-copy > strong { font-size: 10px; }
+  .admin-brand-copy > small { font-size: 5px; }
+  .admin-header-actions { gap: 7px; }
+  .admin-header-actions > .admin-calendar-link { padding: 7px 7px; }
+}

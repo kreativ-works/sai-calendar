@@ -92,11 +92,26 @@ try {
   assert.equal(done.value.items[0].revision, item.revision + 1);
   passed("admin state, priority and private notes persist with stale-edit protection and filtering");
 
-  const deniedPage = await fetch(new URL("/backlog", base), { headers: { Cookie: user.cookie }, signal: AbortSignal.timeout(15_000) });
+  for (const path of ["/admin", "/backlog"]) {
+    const response = await fetch(new URL(path, base), { redirect: "manual", signal: AbortSignal.timeout(15_000) });
+    assert.equal(response.status, 307);
+    assert.equal(new URL(response.headers.get("location"), base).pathname, "/admin/backlog");
+  }
+  const anonymousPage = await fetch(new URL("/admin/backlog", base), { signal: AbortSignal.timeout(15_000) });
+  const anonymousHtml = await anonymousPage.text();
+  assert.equal(anonymousPage.status, 200);
+  assert.ok(anonymousHtml.includes("noindex"));
+  assert.ok(anonymousHtml.includes("/login?returnTo=%2Fadmin%2Fbacklog"));
+  assert.ok(!anonymousHtml.includes(admin.email));
+  passed("admin entry and legacy backlog links redirect, while anonymous sign-in returns to the admin backlog");
+
+  const deniedPage = await fetch(new URL("/admin/backlog", base), { headers: { Cookie: user.cookie }, signal: AbortSignal.timeout(15_000) });
   const deniedHtml = await deniedPage.text();
   assert.equal(deniedPage.status, 200); assert.ok(deniedHtml.includes("운영자 전용 공간")); assert.ok(!deniedHtml.includes(input.message));
-  const adminPage = await fetch(new URL("/backlog", base), { headers: { Cookie: admin.cookie }, signal: AbortSignal.timeout(15_000) });
-  assert.equal(adminPage.status, 200); assert.ok((await adminPage.text()).includes("함께 만드는 사이"));
+  const adminPage = await fetch(new URL("/admin/backlog", base), { headers: { Cookie: admin.cookie }, signal: AbortSignal.timeout(15_000) });
+  const adminHtml = await adminPage.text();
+  assert.equal(adminPage.status, 200); assert.ok(adminHtml.includes("사이 어드민"));
+  assert.ok(adminHtml.includes("피드백 백로그")); assert.ok(adminHtml.includes(admin.email));
   assert.equal((await call(`/api/feedback/${id}`, admin, "PATCH", { ...change, revision: item.revision + 1 }, { "X-Sai-Expected-User": user.appId })).status, 409);
   passed("the admin page and account-switch guard do not expose or mutate feedback for another account");
 

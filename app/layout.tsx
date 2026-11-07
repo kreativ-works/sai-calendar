@@ -8,6 +8,7 @@ import "./notifications.css";
 import "./event-entry.css";
 import "./session-recovery.css";
 import "./feedback.css";
+import "./admin.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://sai-our-calendar.seonguk.chatgpt.site"),
