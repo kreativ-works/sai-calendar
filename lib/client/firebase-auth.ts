@@ -6,6 +6,7 @@ import { disconnectDevicePushBeforeLogout } from "./push-logout";
 import { api } from "./api";
 import { createSessionCoordinator, SessionCancelledError, type RestorationResult } from "./session-coordinator";
 import { announceSessionChange, bindSessionContext, captureSessionContext, invalidateSessionContext } from "./session-context";
+import { canReuseServerBootstrap, hasActiveBootstrapIntent, isFreshServerBootstrap, type ServerSessionBootstrap } from "./session-bootstrap";
 
 export type AuthConfiguration = {
   configured: boolean;
@@ -138,6 +139,27 @@ function installIntentListener() {
     logoutIntent = !!event.newValue;
     if (logoutIntent) void coordinator.logout().catch(() => {});
   });
+}
+
+export function hasFreshServerBootstrap(bootstrap: ServerSessionBootstrap | undefined): boolean {
+  installIntentListener();
+  return hasActiveBootstrapIntent({ logout: logoutIntent, blocked: coordinator.isBlocked(), context: captureSessionContext() }) && isFreshServerBootstrap(bootstrap);
+}
+
+/** Reuse only the exact token verified by this document's SSR request. */
+export async function reuseServerBootstrap(bootstrap: ServerSessionBootstrap | undefined, user: User): Promise<boolean> {
+  installIntentListener();
+  const before = captureSessionContext();
+  try {
+    const auth = await getFirebaseAuth();
+    return await canReuseServerBootstrap(bootstrap, user, {
+      token: () => user.getIdToken(false),
+      active: () => {
+        return hasActiveBootstrapIntent({ logout: logoutIntent, blocked: coordinator.isBlocked(), context: captureSessionContext() }, before)
+          && auth?.currentUser?.uid === user.uid;
+      },
+    });
+  } catch { return false; /* Fall back to the normal synchronized session path. */ }
 }
 
 export function beginSignIn(): void {

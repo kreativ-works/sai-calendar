@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
-import { ArrowUpRight, CalendarDays, ClipboardList, LogOut, ShieldCheck } from "lucide-react";
+import { ArrowUpRight, CalendarDays, ClipboardList, LogOut, ShieldCheck, Sparkles } from "lucide-react";
 
-type Props = { name: string; email: string; children: ReactNode };
+type Props = { name: string; email: string; children: ReactNode; section?: "backlog" | "ai" };
 
-export default function AdminShell({ name, email, children }: Props) {
+export default function AdminShell({ name, email, children, section = "backlog" }: Props) {
   const displayName = name.trim() || "운영자";
   const initial = Array.from(displayName)[0];
 
@@ -23,7 +23,8 @@ export default function AdminShell({ name, email, children }: Props) {
         </div>
         <div className="admin-workspace-bar">
           <nav className="admin-navigation" aria-label="관리 메뉴">
-            <a href="/admin/backlog" aria-current="page"><ClipboardList size={17} aria-hidden="true" /><span>피드백 백로그</span></a>
+            <a href="/admin/backlog" aria-current={section === "backlog" ? "page" : undefined}><ClipboardList size={17} aria-hidden="true" /><span>피드백 백로그</span></a>
+            <a href="/admin/ai" aria-current={section === "ai" ? "page" : undefined}><Sparkles size={17} aria-hidden="true" /><span>AI 연결</span></a>
           </nav>
           <div className="admin-identity" aria-label="현재 로그인한 운영자">
             <span className="admin-avatar" aria-hidden="true">{initial}</span>

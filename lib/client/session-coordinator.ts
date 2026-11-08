@@ -84,7 +84,9 @@ export function createSessionCoordinator<U extends RestorableIdentity, S extends
         if (!current(version)) return { status: "anonymous" };
         if (!user) return { status: "anonymous" };
         if (!user.emailVerified) return { status: "unverified" };
-        const session = await sync(user, true);
+        // The SDK refreshes expired/near-expiry tokens itself; a missing cookie
+        // does not require an extra forced refresh of an otherwise fresh token.
+        const session = await sync(user);
         return current(version) ? { status: "authenticated", session } : { status: "anonymous" };
       } catch (error) {
         if (!current(version) || error instanceof SessionCancelledError) return { status: "anonymous" };

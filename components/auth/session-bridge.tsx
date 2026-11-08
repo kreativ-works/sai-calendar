@@ -2,10 +2,11 @@
 
 import { useEffect, useLayoutEffect } from "react";
 import { onIdTokenChanged } from "firebase/auth";
-import { authPageHref, getFirebaseAuth, isPermanentAuthError, logout, restoreAppSession, syncServerSession } from "@/lib/client/firebase-auth";
+import { authPageHref, getFirebaseAuth, hasFreshServerBootstrap, isPermanentAuthError, logout, restoreAppSession, reuseServerBootstrap, syncServerSession } from "@/lib/client/firebase-auth";
 import { bindSessionContext } from "@/lib/client/session-context";
+import type { ServerSessionBootstrap } from "@/lib/client/session-bootstrap";
 
-export default function SessionBridge({ enabled = true, userId }: { enabled?: boolean; userId?: string }) {
+export default function SessionBridge({ enabled = true, userId, bootstrap }: { enabled?: boolean; userId?: string; bootstrap?: ServerSessionBootstrap }) {
   useLayoutEffect(() => { if (enabled && userId) bindSessionContext(userId); }, [enabled, userId]);
   useEffect(() => {
     if (!enabled) return;
@@ -35,6 +36,7 @@ export default function SessionBridge({ enabled = true, userId }: { enabled?: bo
       if (!active || !auth) return;
       unsubscribe = onIdTokenChanged(auth, user => {
         if (!active || leaving) return;
+        const initialObservation = previousUid === undefined;
         const wasSignedIn = previousUid !== undefined && previousUid !== null;
         previousUid = user?.uid || null;
         if (!user) {
@@ -42,12 +44,24 @@ export default function SessionBridge({ enabled = true, userId }: { enabled?: bo
           else void reconcile(); // A valid server cookie survives an absent SDK store, including PWA startup.
           return;
         }
-        if (!user.emailVerified) { void reconcile(); return; }
-        void syncServerSession(user).then(session => { if (userId && session.user?.id !== userId) leave(true); }).catch(error => {
+        if (!user.emailVerified) {
+          if (bootstrap && bootstrap.subject !== user.uid) void logout().catch(() => {}).finally(() => leave());
+          else void reconcile();
+          return;
+        }
+        void (async () => {
+          if (initialObservation && await reuseServerBootstrap(bootstrap, user)) return;
+          if (!active || leaving) return;
+          const session = await syncServerSession(user);
+          if (active && userId && session.user?.id !== userId) leave(true);
+        })().catch(error => {
+          if (!active || leaving) return;
           if (isPermanentAuthError(error)) void logout().catch(() => {}).finally(() => leave());
         });
       });
-      void reconcile();
+      // SSR just verified this cookie. The initial SDK observer still compares
+      // UID and token digest; focus, expiry, later tokens and API calls recheck.
+      if (!hasFreshServerBootstrap(bootstrap)) void reconcile();
     }).catch(() => { void reconcile(); });
     const update = () => { if (!document.hidden) void reconcile(); };
     const changed = () => leave(true);
@@ -60,6 +74,6 @@ export default function SessionBridge({ enabled = true, userId }: { enabled?: bo
       window.removeEventListener("focus", update); window.removeEventListener("online", update);
       window.removeEventListener("sai:session-changed", changed); document.removeEventListener("visibilitychange", update);
     };
-  }, [enabled, userId]);
+  }, [enabled, userId, bootstrap]);
   return null;
 }

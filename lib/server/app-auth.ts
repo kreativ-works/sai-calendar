@@ -4,6 +4,7 @@ import { getChatGPTUser } from "../../app/chatgpt-auth";
 import { CalendarError } from "../domain/calendar";
 import { getFirebaseConfig, getFirebaseEmulatorUrl, isLoopbackHost } from "./firebase-config";
 import { FirebaseTokenError, verifyFirebaseIdToken, type FirebaseIdentity } from "./firebase-token";
+import { tokenFingerprint, type ServerSessionBootstrap } from "../client/session-bootstrap";
 
 export type AppUser = { userId: string; displayName: string; email: string; fullName: string | null };
 type AppSession = { user: AppUser; identity: FirebaseIdentity; provider: string };
@@ -46,15 +47,29 @@ async function readSession(): Promise<AppSession | null> {
   }
 }
 
-export async function getAppUser(): Promise<AppUser | null> {
-  const user = (await readSession())?.user ?? null;
+async function checkedSession(): Promise<AppSession | null> {
+  const session = await readSession();
+  const user = session?.user ?? null;
   const expectedUser = (await headers()).get("X-Sai-Expected-User");
   // A restored cookie may belong to a different account after another tab signs
   // in. Never apply a request authored in the previous account's calendar there.
   if (user && expectedUser !== null && (expectedUser.length > 128 || expectedUser !== user.userId)) {
     throw new CalendarError(409, "SESSION_CHANGED", "다른 계정으로 전환됐어요. 새로고침한 후 다시 시도해 주세요.");
   }
-  return user;
+  return session;
+}
+
+export async function getAppUser(): Promise<AppUser | null> {
+  return (await checkedSession())?.user ?? null;
+}
+
+/** Exposes only a digest of the already verified cookie, never the bearer token. */
+export async function getAppAccess(): Promise<{ user: AppUser; bootstrap: ServerSessionBootstrap } | null> {
+  const session = await checkedSession();
+  if (!session) return null;
+  const cookie = (await cookies()).get(APP_SESSION_COOKIE)?.value;
+  if (!cookie) return null;
+  return { user: session.user, bootstrap: { subject: session.identity.subject, expiresAt: session.identity.expiresAt, tokenFingerprint: await tokenFingerprint(cookie) } };
 }
 
 export async function hasLegacyCalendar(user: AppUser): Promise<boolean> {

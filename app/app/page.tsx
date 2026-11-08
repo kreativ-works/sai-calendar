@@ -1,9 +1,12 @@
 import CalendarApp from "@/components/calendar/calendar-app";
 import SessionBridge from "@/components/auth/session-bridge";
 import SessionRecovery from "@/components/auth/session-recovery";
-import { getAppUser } from "@/lib/server/app-auth";
+import { getAppAccess } from "@/lib/server/app-auth";
 import { isFeedbackAdmin } from "@/lib/server/feedback-service";
 import { validDate } from "@/lib/domain/calendar";
+import { readStateForUser } from "@/lib/server/calendar-service";
+import { initialCalendarRange } from "@/lib/client/calendar-bootstrap";
+import { todayInSeoul } from "@/lib/client/calendar-view";
 
 export const dynamic = "force-dynamic";
 export const metadata = { robots: { index: false, follow: false } };
@@ -27,7 +30,15 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
 }
 
 async function CalendarAccess({ initialDemo, initialSetup, initialJoinCode, returnTo }: { initialDemo: boolean; initialSetup: Setup; initialJoinCode: string; returnTo: string }) {
-  const user = await getAppUser().catch(() => null);
-  if (!initialDemo && !user) return <SessionRecovery returnTo={returnTo} anonymousHref={`/login?returnTo=${encodeURIComponent(returnTo)}`} />;
-  return <>{user && !initialDemo ? <SessionBridge userId={user.userId} /> : null}<CalendarApp initialDemo={initialDemo} initialSetup={initialSetup} initialJoinCode={initialJoinCode} signedIn={!!user} feedbackAdmin={isFeedbackAdmin(user)} /></>;
+  const today = todayInSeoul();
+  // The example calendar must not inspect a real account or fetch private state.
+  if (initialDemo) return <CalendarApp initialDemo initialToday={today} initialSetup={initialSetup} initialJoinCode={initialJoinCode} />;
+  const access = await getAppAccess().catch(() => null);
+  if (!access) return <SessionRecovery returnTo={returnTo} anonymousHref={`/login?returnTo=${encodeURIComponent(returnTo)}`} />;
+  const { user, bootstrap } = access;
+  const range = initialCalendarRange(today);
+  // Reuse the identity verified above. A storage failure retains the existing
+  // client loading/retry flow instead of turning it into a false sign-out.
+  const state = await readStateForUser(user, range.from, range.to).catch(() => null);
+  return <><SessionBridge userId={user.userId} bootstrap={bootstrap} /><CalendarApp initialToday={today} initialCalendar={state ? { today, ...range, state } : undefined} initialSetup={initialSetup} initialJoinCode={initialJoinCode} signedIn feedbackAdmin={isFeedbackAdmin(user)} /></>;
 }

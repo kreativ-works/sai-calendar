@@ -36,13 +36,13 @@ test("restoration keeps a valid server session without requiring an SDK store", 
   assert.deepEqual(calls, [["authenticated", "app-alice"]]);
 });
 
-test("expired cookies restore once from persistent Firebase identity with a refreshed token", async () => {
+test("expired cookies restore once with the SDK's fresh token without an unconditional forced refresh", async () => {
   const { session, calls } = coordinator();
   const first = session.restore();
   const second = session.restore();
   assert.equal(first, second);
   assert.deepEqual(await first, { status: "authenticated", session: aliceSession });
-  assert.deepEqual(calls, ["read-server", "read-identity", ["token", alice.uid, true], ["write-server", "fresh-token"], ["authenticated", "app-alice"]]);
+  assert.deepEqual(calls, ["read-server", "read-identity", ["token", alice.uid, false], ["write-server", "fresh-token"], ["authenticated", "app-alice"]]);
 });
 
 test("unverified and absent persistent identities never receive an app session", async () => {

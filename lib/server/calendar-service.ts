@@ -103,9 +103,18 @@ function fromRow(row: EventRow): StoredEvent {
 }
 
 export async function readState(request: Request): Promise<CalendarState> {
-  const { db, user, member } = await context(request, false);
+  const user = await getAppUser();
+  if (!user) throw new CalendarError(401, "SIGN_IN_REQUIRED", "로그인하면 두 분의 일정을 안전하게 저장할 수 있어요.");
   const url = new URL(request.url);
   const { from, to } = parseRange(url.searchParams.get("from"), url.searchParams.get("to"));
+  return readStateForUser(user, from, to);
+}
+
+/** Internal server callers must first obtain this user through getAppUser/getAppAccess. */
+export async function readStateForUser(user: AppUser, requestedFrom: string, requestedTo: string): Promise<CalendarState> {
+  const { from, to } = parseRange(requestedFrom, requestedTo);
+  const db = database();
+  const member = await db.prepare("SELECT user_id, household_id, slot FROM members WHERE user_id = ?").bind(user.userId).first<MemberRow>();
   const userInfo = { id: user.userId, name: user.displayName, email: user.email };
   if (!member) return { user: userInfo, viewerSlot: null, household: null, members: [], events: [], invite: null };
   const [household, members, events, invite] = await Promise.all([

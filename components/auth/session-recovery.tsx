@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ArrowRight, LoaderCircle, RefreshCw, WifiOff } from "lucide-react";
 import { authPageHref, normalizeReturnTo, restoreAppSession } from "@/lib/client/firebase-auth";
 
-type SessionRecoveryProps = { returnTo: string; anonymousHref?: string; silent?: boolean };
+type SessionRecoveryProps = { returnTo: string; anonymousHref?: string; silent?: boolean; preserveFragment?: boolean };
 type Phase = "checking" | "anonymous" | "error";
 
 function anonymousDestination(value: string | undefined, returnTo: string): string {
@@ -19,7 +19,7 @@ function anonymousDestination(value: string | undefined, returnTo: string): stri
   return authPageHref(path, returnTo);
 }
 
-export default function SessionRecovery({ returnTo, anonymousHref, silent = false }: SessionRecoveryProps) {
+export default function SessionRecovery({ returnTo, anonymousHref, silent = false, preserveFragment = false }: SessionRecoveryProps) {
   const destination = normalizeReturnTo(returnTo);
   const fallback = anonymousDestination(anonymousHref, destination);
   const signInHref = authPageHref("/login", destination);
@@ -38,10 +38,17 @@ export default function SessionRecovery({ returnTo, anonymousHref, silent = fals
         if (!mounted) return;
         if (result.status === "authenticated") {
           navigating = true;
-          window.location.replace(destination);
+          // Shortcuts keep private dictated text in a fragment, never a login query.
+          const fragment = preserveFragment && window.location.hash.length <= 80_000 ? window.location.hash : "";
+          window.location.replace(destination + fragment);
         } else if (!silent && anonymousHref !== undefined) {
           navigating = true;
-          window.location.replace(fallback);
+          if (preserveFragment && window.location.hash) {
+            const login = new URL(fallback, window.location.origin);
+            const retry = new URL(destination, window.location.origin); retry.searchParams.set("shareError", "signin");
+            login.searchParams.set("returnTo", retry.pathname + retry.search);
+            window.location.replace(login.pathname + login.search);
+          } else window.location.replace(fallback);
         } else setPhase("anonymous");
       } catch {
         // A connectivity problem must never erase a remembered account.
@@ -61,7 +68,7 @@ export default function SessionRecovery({ returnTo, anonymousHref, silent = fals
       window.removeEventListener("online", retry);
       window.removeEventListener("focus", retry);
     };
-  }, [destination, fallback, anonymousHref, silent, attempt]);
+  }, [destination, fallback, anonymousHref, silent, attempt, preserveFragment]);
 
   if (silent) return null;
   const checking = phase === "checking";

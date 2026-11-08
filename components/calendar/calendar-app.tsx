@@ -13,6 +13,7 @@ import EventEditor, { OWNERS, type OwnerNames } from "./event-editor";
 import NotificationCenter, { type NotificationView } from "@/components/notifications/notification-center";
 import type { NotificationItem } from "@/lib/domain/notifications";
 import FeedbackDialog from "@/components/feedback/feedback-dialog";
+import { matchesCalendarBootstrap, type CalendarBootstrap } from "@/lib/client/calendar-bootstrap";
 
 type View = "month" | "week" | "list";
 type EditorState = { date: string; event?: CalendarEvent } | null;
@@ -26,12 +27,13 @@ function EmptyState({ title, subtitle, onCreate }: { title: string; subtitle?: s
   return <div className="empty-state"><div className="empty-symbol"><CalendarHeart size={30} strokeWidth={1.2} /></div><h3>{title}</h3>{subtitle ? <p>{subtitle}</p> : null}{onCreate ? <button className="text-button" onClick={onCreate}><Plus size={15} />일정 만들기</button> : null}</div>;
 }
 
-type CalendarAppProps = { initialDemo?: boolean; initialSetup?: "create" | "join" | null; initialJoinCode?: string; signedIn?: boolean; feedbackAdmin?: boolean };
+type CalendarAppProps = { initialDemo?: boolean; initialSetup?: "create" | "join" | null; initialJoinCode?: string; signedIn?: boolean; feedbackAdmin?: boolean; initialToday?: string; initialCalendar?: CalendarBootstrap };
 
-export default function CalendarApp({ initialDemo = false, initialSetup = null, initialJoinCode = "", signedIn = false, feedbackAdmin = false }: CalendarAppProps) {
-  const [today, setToday] = useState(todayInSeoul);
-  const [cursor, setCursor] = useState(() => monthStart(todayInSeoul()));
-  const [selected, setSelected] = useState(todayInSeoul);
+export default function CalendarApp({ initialDemo = false, initialSetup = null, initialJoinCode = "", signedIn = false, feedbackAdmin = false, initialToday, initialCalendar }: CalendarAppProps) {
+  const [startingDay] = useState(() => initialCalendar?.today || initialToday || todayInSeoul());
+  const [today, setToday] = useState(startingDay);
+  const [cursor, setCursor] = useState(() => monthStart(startingDay));
+  const [selected, setSelected] = useState(startingDay);
   const [view, setView] = useState<View>("month");
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -39,16 +41,16 @@ export default function CalendarApp({ initialDemo = false, initialSetup = null, 
   const searchToggle = useRef<HTMLButtonElement>(null);
   const [filters, setFilters] = useState(ALL_FILTERS);
   const [mode, setMode] = useState<"demo" | "live">(initialDemo ? "demo" : "live");
-  const [snapshot, setSnapshot] = useState<CalendarState | null>(null);
+  const [snapshot, setSnapshot] = useState<CalendarState | null>(() => initialDemo ? null : initialCalendar?.state ?? null);
   const [demoEvents, setDemoEvents] = useState<StoredEvent[]>(createDemoEvents);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialDemo && !initialCalendar);
   const [connectionError, setConnectionError] = useState("");
   const [requiresSignIn, setRequiresSignIn] = useState(!signedIn);
   const [lastRefreshed, setLastRefreshed] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editor, setEditor] = useState<EditorState>(null);
   const [detail, setDetail] = useState<CalendarEvent | null>(null);
-  const [settings, setSettings] = useState<"create" | "join" | "settings" | null>(null);
+  const [settings, setSettings] = useState<"create" | "join" | "settings" | null>(() => !initialDemo && initialCalendar && !initialCalendar.state.household ? initialSetup === "join" || initialJoinCode ? "join" : "create" : null);
   const [joinCode, setJoinCode] = useState(initialJoinCode);
   const [toast, setToast] = useState("");
   const [notificationView, setNotificationView] = useState<NotificationView>(null);
@@ -56,7 +58,8 @@ export default function CalendarApp({ initialDemo = false, initialSetup = null, 
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const notificationLinkHandled = useRef(false);
   const requestId = useRef(0);
-  const initialized = useRef(false);
+  const initialized = useRef(!initialDemo && !!initialCalendar);
+  const initialRange = useRef(initialDemo || !initialCalendar ? null : { from: initialCalendar.from, to: initialCalendar.to });
   const modeIntent = useRef<"demo" | "live">(initialDemo ? "demo" : "live");
   const searching = query.trim().length > 0;
   const from = searching ? today : addDays(monthStart(cursor), -7);
@@ -94,7 +97,14 @@ export default function CalendarApp({ initialDemo = false, initialSetup = null, 
 
   // These effects hydrate external URL/storage/API state after SSR, avoiding a different first client render.
   /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => { void refresh().catch(() => {}); }, [refresh]);
+  useEffect(() => {
+    if (isDemo) { initialRange.current = null; return; }
+    // A successful SSR snapshot already covers this first range. Keep the hint
+    // through Strict Mode's repeated mount effects; discard it on navigation.
+    if (matchesCalendarBootstrap(initialRange.current, from, to)) return;
+    initialRange.current = null;
+    void refresh().catch(() => {});
+  }, [isDemo, from, to, refresh]);
   useEffect(() => {
     try { const stored = localStorage.getItem("sai:view:v1"); if (stored === "month" || stored === "week" || stored === "list") setView(stored); } catch { /* Preferences are optional. */ }
     const timer = window.setInterval(() => setToday(todayInSeoul()), 60_000);
@@ -252,7 +262,7 @@ export default function CalendarApp({ initialDemo = false, initialSetup = null, 
       <nav className="main-nav"><button className={view !== "list" ? "active" : ""} onClick={() => { setView("month"); setQuery(""); setSidebarOpen(false); }}><CalendarDays size={19} />우리 캘린더<span className="nav-active-dot" /></button><button className={view === "list" ? "active" : ""} onClick={() => { setView("list"); setSidebarOpen(false); }}><List size={19} />일정 모아보기</button></nav>
       <div className="mini-calendar"><div className="mini-heading"><strong>{monthLabel(cursor)}</strong><div><button className="tiny-icon-button" onClick={() => setCursor(shiftMonth(cursor, -1))} aria-label="작은 달력 이전 달"><ChevronLeft size={15} /></button><button className="tiny-icon-button" onClick={() => setCursor(shiftMonth(cursor, 1))} aria-label="작은 달력 다음 달"><ChevronRight size={15} /></button></div></div><div className="mini-grid">{WEEKDAYS.map(day => <span key={day} className="mini-weekday">{day}</span>)}{cells.map(date => <button key={date} className={`${date.slice(0, 7) !== cursor.slice(0, 7) ? "outside" : ""} ${date === selected ? "selected" : ""} ${date === today ? "today" : ""}`} aria-label={fullDate(date)} aria-current={date === today ? "date" : undefined} onClick={() => selectDate(date)}>{dayNumber(date)}</button>)}</div></div>
       <section className="calendar-filters"><div className="sidebar-section-label">우리의 캘린더<span>3</span></div>{OWNERS.map(owner => <button key={owner} className={`filter-row owner-${owner}`} aria-pressed={filters[owner]} onClick={() => setFilters(old => ({ ...old, [owner]: !old[owner] }))}><span className={`filter-check ${filters[owner] ? "checked" : ""}`}>{filters[owner] ? <Check size={12} strokeWidth={2.5} /> : null}</span><span>{names[owner]}</span>{owner === "both" ? <Heart size={14} /> : <span className="filter-type">{isDemo ? "예시" : snapshot?.viewerSlot === owner ? "나" : "짝꿍"}</span>}</button>)}</section>
-      <div className="sidebar-bottom"><div className="shared-space"><span className="space-icon"><Users size={19} /></span><div><strong>{isDemo ? "둘만의 작은 공간" : allConnected ? "두 사람이 연결됐어요" : "짝꿍과 함께 시작해요"}</strong><p>{isDemo ? "우리의 하루를 더 가깝게" : allConnected ? `${names.a} · ${names.b}` : "초대 링크를 보내보세요"}</p></div></div><button className="sidebar-settings" onClick={openSettings}><Settings2 size={18} />캘린더 설정<ChevronRight size={15} /></button><button className="sidebar-settings" onClick={openFeedback}><MessageSquare size={18} />의견 보내기<ChevronRight size={15} /></button>{feedbackAdmin && !isDemo ? <a className="sidebar-settings feedback-admin-link" href="/admin"><ClipboardList size={18} />관리자 페이지<ChevronRight size={15} /></a> : null}<p className="sidebar-footnote">MADE FOR TWO, BY SAI.</p></div>
+      <div className="sidebar-bottom"><div className="shared-space"><span className="space-icon"><Users size={19} /></span><div><strong>{isDemo ? "둘만의 작은 공간" : allConnected ? "두 사람이 연결됐어요" : "짝꿍과 함께 시작해요"}</strong><p>{isDemo ? "우리의 하루를 더 가깝게" : allConnected ? `${names.a} · ${names.b}` : "초대 링크를 보내보세요"}</p></div></div><button className="sidebar-settings" onClick={openSettings}><Settings2 size={18} />캘린더 설정<ChevronRight size={15} /></button><a className="sidebar-settings" href="/assistant"><Sparkles size={18} />일정 도우미<ChevronRight size={15} /></a><button className="sidebar-settings" onClick={openFeedback}><MessageSquare size={18} />의견 보내기<ChevronRight size={15} /></button>{feedbackAdmin && !isDemo ? <a className="sidebar-settings feedback-admin-link" href="/admin"><ClipboardList size={18} />관리자 페이지<ChevronRight size={15} /></a> : null}<p className="sidebar-footnote">MADE FOR TWO, BY SAI.</p></div>
     </aside>
 
     <div className="app-workspace">

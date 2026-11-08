@@ -152,3 +152,26 @@ export const feedback = sqliteTable("feedback", {
   index("feedback_created_id").on(table.createdAt, table.id),
   index("feedback_status_created").on(table.status, table.createdAt, table.id),
 ]);
+
+export const aiSettings = sqliteTable("ai_settings", {
+  id: integer("id").primaryKey(),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  ciphertext: text("ciphertext").notNull(),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const assistantUsage = sqliteTable("assistant_usage", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [index("assistant_usage_user_created").on(table.userId, table.createdAt), index("assistant_usage_created").on(table.createdAt)]);
+
+export const assistantHandoffs = sqliteTable("assistant_handoffs", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  ciphertext: text("ciphertext").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [index("assistant_handoffs_expiry").on(table.expiresAt), index("assistant_handoffs_user").on(table.userId, table.createdAt)]);
