@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import StaticAssets from "@/components/performance/static-assets";
 import "./globals.css";
 import "./mobile-refinements.css";
 import "./mobile-first.css";
@@ -44,7 +45,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased"><StaticAssets />{children}</body>
     </html>
   );
 }
